@@ -737,6 +737,7 @@ function boot(dataText,basis){
   try{
     const a=await fetch("data.json?"+Date.now());
     if(!a.ok) throw new Error("파일을 받지 못했습니다");
+    window.__DTAG=a.headers.get("etag")||a.headers.get("last-modified")||"";
     raw=await a.json();
   }catch(e){ say("데이터를 불러오지 못했습니다 — "+e.message); gpw.disabled=true; return; }
   if(!raw.enc){                       // 평문(로컬 테스트)

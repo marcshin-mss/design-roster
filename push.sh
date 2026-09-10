@@ -3,6 +3,7 @@
 #   cd ~/Documents/design-roster && bash push.sh
 set -e
 cd "$(dirname "$0")"
+find .git -name '*.lock' -delete 2>/dev/null || true   # 남아 있는 잠금 정리
 
 GH=""
 if command -v gh >/dev/null 2>&1; then
