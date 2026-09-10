@@ -45,7 +45,7 @@ fi
 "$GH" auth setup-git
 
 echo "▸ 3/3  푸시"
-if ls *.json 2>/dev/null | grep -vqx data.json; then
+if ls *.json 2>/dev/null | grep -vx data.json | grep -vqx sync.json; then
   echo "  기준값이 갱신되어 다시 봉인합니다 — GATE_PASS 를 넣어 주세요"
   python3 seal.py
 fi

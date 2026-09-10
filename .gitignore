@@ -6,6 +6,4 @@ taxonomy.json
 basis.json
 slack.json
 one.json
-
-# 로컬 도구
-.tools/
+app.json

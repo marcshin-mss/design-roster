@@ -281,7 +281,7 @@ def main():
             seen.add(r[0]); out.append(r)
         return out
 
-    D = {"teams": [], "themes": tax["themes"], "sum": tax["summaries"],
+    D = {"teams": [], "themes": tax["themes"], "sum": tax["summaries"], "short": tax.get("short", {}),
          "asof": (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")}
     for t in teams:
         tm = {"k": t["key"], "name": t["name"], "lead": t["lead"],

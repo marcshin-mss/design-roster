@@ -10,7 +10,7 @@ GitHub Secrets 의 GATE_PASS 와 반드시 같은 값을 넣어야 한다.
 import os, sys, json, getpass, base64, hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NAMES = ["taxonomy", "basis", "slack", "one"]
+NAMES = ["taxonomy", "basis", "slack", "one", "app"]
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
