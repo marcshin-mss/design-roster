@@ -9,7 +9,7 @@
 
 전부 읽기 전용 조회다. 지라에 아무것도 쓰지 않는다.
 """
-import os, sys, json, base64, hashlib, datetime, urllib.request, urllib.parse, urllib.error
+import os, re, sys, json, base64, hashlib, datetime, urllib.request, urllib.parse, urllib.error
 
 BASE  = os.environ.get("JIRA_BASE", "https://musinsa-oneteam.atlassian.net").rstrip("/")
 EMAIL = os.environ.get("JIRA_EMAIL", "")
@@ -211,8 +211,23 @@ def main():
             anchor[a] = tname
         if e.get("initiative"):
             anchor.setdefault(e["initiative"], tname)
-    BUCKET = "기타 개선·QA 요청"
+    BUCKET = "디자인QA"          # QA 요청만 담는 묶음 (담당자별로 크기를 따로 잡는다)
     M29 = {"M29CMPROD", "M29CEF"}
+
+    def is_qa(summ):
+        """디자인 QA 성격의 티켓인지 — 제목으로 판정한다."""
+        u = summ.upper()
+        if "디자인 QA" in summ or "디자인QA" in summ:
+            return True
+        return re.search(r"(^|[^A-Z])QA([^A-Z]|$)", u) is not None
+
+    def clean_name(summ):
+        """티켓 제목을 과제 이름으로 다듬는다 — 티켓 종류 표시만 떼어낸다."""
+        t = summ.strip()
+        for p in ("[Design] ", "[design] ", "[디자인] "):
+            if t.startswith(p):
+                t = t[len(p):].strip()
+        return t or summ.strip()
     per = {}          # 담당자 → 과제명 → [티켓]
     hold, done = {}, {}
     fresh = []
@@ -244,8 +259,16 @@ def main():
                                            "bucket": False, "anchors": []}
                     fresh.append(tname)
                 anchor[root] = tname
-            else:
+            elif is_qa(summ):
                 tname = BUCKET
+            else:
+                # 기타 개선 건 — 티켓 하나를 과제 하나로 본다 (다른 과제와 같은 규칙 적용)
+                tname = clean_name(summ)
+                if tname not in tax["tasks"]:
+                    tax["tasks"][tname] = {"domain": "기타 서비스", "badges": ["신규"],
+                                           "initiative": None, "platform": "무신사",
+                                           "bucket": False, "anchors": [key]}
+                    fresh.append(tname)
         per.setdefault(who, {}).setdefault(tname, []).append([key, summ, st, None, F(n, "project", "key")])
 
     for w in done:
