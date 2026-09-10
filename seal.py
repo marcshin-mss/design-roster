@@ -27,11 +27,15 @@ def seal(text, pw):
             "salt": b(salt), "iv": b(iv), "ct": b(ct)}
 
 
-pw = getpass.getpass("GATE_PASS (GitHub Secrets 에 넣은 값): ")
-if not pw:
-    sys.exit("비밀번호가 비어 있습니다.")
-if getpass.getpass("한 번 더: ") != pw:
-    sys.exit("두 값이 다릅니다.")
+pw = os.environ.get("GATE_PASS")          # push.sh 가 키체인에서 꺼내 넘겨준다
+if pw:
+    print("  (키체인에 저장된 GATE_PASS 사용)")
+else:
+    pw = getpass.getpass("GATE_PASS (GitHub Secrets 에 넣은 값): ")
+    if not pw:
+        sys.exit("비밀번호가 비어 있습니다.")
+    if getpass.getpass("한 번 더: ") != pw:
+        sys.exit("두 값이 다릅니다.")
 
 done = []
 for n in NAMES:
