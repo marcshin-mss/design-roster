@@ -1,0 +1,67 @@
+name: 코드 배포
+# Cloudflare Worker 의 /publish 큐에 올라온 파일을 받아 커밋한다.
+# 커밋이 main 에 올라가면 refresh.yml 이 빌드·배포를 이어서 한다.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 큐에서 파일 받아 쓰기
+        env:
+          WORKER: https://design-roster-sync.marc-shin.workers.dev
+        run: |
+          python3 - <<'PY'
+          import os, json, base64, urllib.request
+          w = os.environ["WORKER"]
+          raw = urllib.request.urlopen(w + "/pull", timeout=30).read().decode()
+          p = json.loads(raw)
+          env = open(os.environ["GITHUB_ENV"], "a")
+          if not p:
+              print("배포 큐가 비어 있습니다."); env.write("SKIP=1\n"); raise SystemExit
+          for f in p["files"]:
+              b = base64.b64decode(f["content"])
+              d = os.path.dirname(f["path"])
+              if d: os.makedirs(d, exist_ok=True)
+              with open(f["path"], "wb") as fh: fh.write(b)
+              print("wrote", f["path"], len(b), "bytes")
+          t = os.environ["RUNNER_TEMP"]
+          open(t + "/msg.txt", "w").write(p.get("message", "대시보드 배포"))
+          open(t + "/id.txt", "w").write(p["id"])
+          PY
+
+      - name: 커밋·푸시
+        if: ${{ env.SKIP != '1' }}
+        run: |
+          git config user.name  "roster-bot"
+          git config user.email "roster-bot@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "바뀐 내용이 없습니다."
+          else
+            git commit -m "$(cat "$RUNNER_TEMP/msg.txt")"
+            git pull --rebase --autostash origin main || true
+            git push
+          fi
+
+      - name: 큐 비우기
+        if: ${{ always() }}
+        env:
+          WORKER: https://design-roster-sync.marc-shin.workers.dev
+        run: |
+          if [ -f "$RUNNER_TEMP/id.txt" ]; then
+            curl -sS -X POST "$WORKER/pull-done" \
+              -H 'content-type: application/json' \
+              -d "{\"id\":\"$(cat "$RUNNER_TEMP/id.txt")\"}" || true
+          fi
