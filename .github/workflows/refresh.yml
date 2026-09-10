@@ -1,0 +1,45 @@
+name: 대시보드 갱신
+
+on:
+  schedule:
+    - cron: "*/30 22-23,0-9 * * 0-5"   # 평일 07:00~19:00 KST, 30분마다
+  workflow_dispatch:                    # Actions 탭에서 수동 실행
+  push:
+    branches: [main]
+    paths: ["basis.enc", "taxonomy.enc"]   # 기준·과제 정의를 고치면 바로 다시 빌드
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install cryptography
+      - name: 지라에서 읽어 data.json 생성
+        env:
+          JIRA_BASE:  ${{ secrets.JIRA_BASE }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          GATE_PASS:  ${{ secrets.GATE_PASS }}
+        run: python build.py
+      - name: 변경분 커밋
+        run: |
+          git config user.name  "roster-bot"
+          git config user.email "roster-bot@users.noreply.github.com"
+          git add -A data.json taxonomy.enc basis.enc slack.enc one.enc
+          git diff --staged --quiet || git commit -m "갱신 $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
+          git push
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: "." }
+      - uses: actions/deploy-pages@v4

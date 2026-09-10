@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+*.pyc
+# 평문은 절대 커밋하지 않는다 — seal.py 로 .enc 로 만들어 올린다
+taxonomy.json
+basis.json
+slack.json
+one.json
