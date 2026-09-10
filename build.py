@@ -293,6 +293,13 @@ def main():
         if "오너" not in tax["tasks"][summ]["badges"]:
             tax["tasks"][summ]["badges"].append("오너")
 
+    # ── 5.5 디자인QA 는 도메인·성격을 항상 고정한다 (봉인본 상태와 무관하게 self-heal) ──
+    if BUCKET in tax["tasks"]:
+        tax["tasks"][BUCKET]["domain"] = "디자인QA"
+        tax["tasks"][BUCKET]["badges"] = ["QA"]
+    if not any(th["k"] == "디자인QA" for th in tax["themes"]):
+        tax["themes"].append({"k": "디자인QA", "n": 1})
+
     # ── 6. D 조립 ──────────────────────────────────────────────────
     def dedupe(rows):
         ks = {r[0] for r in rows}
