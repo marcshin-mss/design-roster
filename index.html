@@ -99,7 +99,9 @@ body.fold .obar{transform:translateY(calc(-100% - 4px));opacity:0;pointer-events
 .kcol{background:var(--plane);min-width:0;padding-bottom:18px;display:flex;flex-direction:column}
 .kcol .kbody{flex:1 1 auto}
 .khead{flex:0 0 auto;position:sticky;top:calc(var(--r1H,52px) + var(--obarH,84px));z-index:20;display:flex;align-items:baseline;gap:8px;
-  background:var(--band);border-bottom:1px solid var(--rule-2);padding:8px 14px}
+  background:var(--band);border-bottom:1px solid var(--rule-2);padding:8px 14px;
+  transition:top .24s cubic-bezier(.22,.61,.36,1)}
+body.fold .khead{top:var(--r1H,52px)}
 .khead h3{margin:0;font-size:13px;font-weight:700;letter-spacing:-.02em}
 .khead span{margin-left:auto;font-size:12px;font-weight:600;color:var(--ink-2);
   font-variant-numeric:tabular-nums}
@@ -473,6 +475,7 @@ ol.lnk .lm{color:var(--ink-3);font-size:11px;font-variant-numeric:tabular-nums;w
 .stat b{font-family:Pretendard,system-ui,sans-serif;font-size:14px;font-weight:600;
   letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .stat span{font-size:11px;color:var(--ink-3)}
+.stats .ssep{align-self:center;width:1px;height:15px;background:var(--rule-2);margin:0 4px;flex:0 0 auto}
 
 .top-r2{display:flex;gap:8px;align-items:flex-start;padding:0 20px 9px;flex-wrap:wrap}
 .top-r2:last-of-type{padding-bottom:13px}
