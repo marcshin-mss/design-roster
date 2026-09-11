@@ -15,7 +15,8 @@ BASE  = os.environ.get("JIRA_BASE", "https://musinsa-oneteam.atlassian.net").rst
 EMAIL = os.environ.get("JIRA_EMAIL", "")
 TOKEN = os.environ.get("JIRA_TOKEN", "")
 GATE  = os.environ.get("GATE_PASS", "")
-CUT   = "2026-07-01"
+CUT   = "2026-07-01"            # 하반기 시작 — 이 이전에 '이미 끝난' 것만 뺀다
+LEAD  = "2026-04-01"            # 7/1 이전 생성이라도 이 이후 생성 + 진행 중이면 포함(직전 분기부터)
 HERE  = os.path.dirname(os.path.abspath(__file__))
 
 TYPES   = '"Design","Task","작업"'
@@ -39,8 +40,17 @@ def jql(q, fields, cap=2000):
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             })
-        with urllib.request.urlopen(req, timeout=60) as r:
-            d = json.load(r)
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    d = json.load(r)
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+                if attempt == 3:
+                    raise
+                import time as _t
+                print(f"  지라 연결 실패({e}), {2**attempt}초 후 재시도")
+                _t.sleep(2 ** attempt)
         out += d.get("issues", [])
         token = d.get("nextPageToken")
         if not token or d.get("isLast") or len(out) >= cap:
@@ -153,7 +163,9 @@ def main():
            "created", "resolutiondate", "labels", "project"]
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
-    issues = jql(f'issuetype in ({TYPES}) AND assignee in {IN} AND created >= "{CUT}" '
+    # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
+    issues = jql(f'issuetype in ({TYPES}) AND assignee in {IN} '
+                 f'AND (created >= "{CUT}" OR (created >= "{LEAD}" AND statusCategory = "In Progress" AND status != "HOLD")) '
                  f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
     print(f"티켓 {len(issues)}건")
     if len(issues) < 120:
@@ -243,7 +255,7 @@ def main():
             continue
         if st == "완료":
             if day(F(n, "created")) >= CUT and (day(F(n, "resolutiondate")) or "") >= CUT:
-                done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate"))])
+                done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created"))])
             continue
         tname = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
         if not tname:
@@ -284,7 +296,7 @@ def main():
         if st == "보류":
             hold.setdefault(who, []).append([key, summ, "HOLD", "", day(F(n, "created"))]); continue
         if st == "완료":
-            done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate"))]); continue
+            done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created"))]); continue
         per.setdefault(who, {})[summ] = [[key, summ, st, None, F(n, "project", "key")]]
         tax["tasks"].setdefault(summ, {"domain": "기타 서비스", "badges": ["오너"], "initiative": None,
                                        "platform": "29CM" if F(n, "project", "key") in M29 else "무신사",
@@ -293,12 +305,12 @@ def main():
         if "오너" not in tax["tasks"][summ]["badges"]:
             tax["tasks"][summ]["badges"].append("오너")
 
-    # ── 5.5 디자인QA 는 도메인·성격을 항상 고정한다 (봉인본 상태와 무관하게 self-heal) ──
+    # ── 5.5 디자인QA 는 '성격(QA)'으로만 다룬다 — 도메인은 서비스 영역이 아니므로 기타 서비스에 둔다 ──
     if BUCKET in tax["tasks"]:
-        tax["tasks"][BUCKET]["domain"] = "디자인QA"
+        tax["tasks"][BUCKET]["domain"] = "기타 서비스"
         tax["tasks"][BUCKET]["badges"] = ["QA"]
-    if not any(th["k"] == "디자인QA" for th in tax["themes"]):
-        tax["themes"].append({"k": "디자인QA", "n": 1})
+    # FT·디자인QA 는 도메인 축에서 뺀다 (성격 축에만 남긴다)
+    tax["themes"] = [th for th in tax["themes"] if th["k"] not in ("FT", "디자인QA")]
 
     # ── 6. D 조립 ──────────────────────────────────────────────────
     def dedupe(rows):
@@ -349,7 +361,7 @@ def main():
             tm["members"].append({
                 "name": who, "role": m.get("role", ""), "lead": bool(m.get("lead")),
                 "tasks": tasks, "n": sum(len(x["tk"]) for x in tasks),
-                "hd": hold.get(who, []), "dn": [[d2[0], d2[1], d2[2]] for d2 in done.get(who, [])],
+                "hd": hold.get(who, []), "dn": [[d2[0], d2[1], d2[2], (d2[3] if len(d2)>3 else None), (d2[4] if len(d2)>4 else None)] for d2 in done.get(who, [])],
                 "wk": 0, "over": 0, "md": 0})
         tm["members"].sort(key=lambda m2: (1 if m2["lead"] else 0, -m2["n"], m2["name"]))
         tm["hold"] = sum(len(m2["hd"]) for m2 in tm["members"])

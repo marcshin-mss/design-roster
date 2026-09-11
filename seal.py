@@ -12,10 +12,24 @@ import os, sys, json, getpass, base64, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAMES = ["taxonomy", "basis", "slack", "one", "app"]
 
-try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-except ImportError:
-    sys.exit("먼저 설치해 주세요:  pip3 install cryptography")
+def _load_aesgcm():
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        return AESGCM
+    except ImportError:
+        pass
+    print("cryptography 설치 중… (처음 한 번만, 잠시 걸립니다)")
+    import subprocess
+    for args in (["--user","--quiet"], ["--break-system-packages","--quiet"], ["--quiet"]):
+        try:
+            subprocess.run([sys.executable,"-m","pip","install",*args,"cryptography"], check=False)
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            return AESGCM
+        except ImportError:
+            continue
+    sys.exit("cryptography 자동 설치에 실패했습니다. 터미널에서 'python3 -m pip install --user cryptography' 후 다시 시도해 주세요.")
+
+AESGCM = _load_aesgcm()
 
 
 def seal(text, pw):

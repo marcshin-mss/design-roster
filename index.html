@@ -77,11 +77,12 @@ body.sheet-on .app{padding-right:var(--sw)}
 [hidden]{display:none!important}
 
 /* ── ONE : design-driven 칸반 ── */
-.obar{position:sticky;top:var(--r1H,52px);z-index:30;display:flex;flex-direction:column;gap:11px;
+.obar{position:sticky;top:var(--r1H,52px);z-index:30;display:flex;flex-flow:row wrap;column-gap:20px;row-gap:8px;align-items:center;
   padding:13px 20px 14px;background:var(--surface);border-bottom:1px solid var(--rule-2);
   transition:transform .24s cubic-bezier(.22,.61,.36,1),opacity .16s linear}
 body.fold .obar{transform:translateY(calc(-100% - 4px));opacity:0;pointer-events:none}
-.obar .r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.obar .r{position:relative;display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
+.obar .r+.r::before{content:"";position:absolute;left:-10px;top:50%;transform:translateY(-50%);height:14px;width:1px;background:var(--rule-2)}
 .osearch{flex:0 1 260px;font:inherit;font-size:12px;color:var(--ink);background:var(--sunk);
   border:1px solid var(--rule);border-radius:var(--r-sm);padding:4px 10px}
 .osearch::placeholder{color:var(--ink-3)}
@@ -119,7 +120,36 @@ body.fold .obar{transform:translateY(calc(-100% - 4px));opacity:0;pointer-events
 
 /* ── 도메인별 / 성격별 : 집계 뷰 ── */
 .gwrap{padding:20px 20px 0}
-.glede{font-size:12.5px;color:var(--ink-2);line-height:1.65;max-width:74ch;margin:0 0 18px}
+.glede{font-size:12.5px;color:var(--ink-2);line-height:1.5;margin:0 0 14px}
+.kpibox{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:0 0 14px}
+.kpicard{position:relative;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-md);padding:14px 16px 15px;overflow:hidden}
+.kpicard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,var(--accent))}
+.kpicard .kl{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--ink-2);letter-spacing:-.01em}
+.kpicard .kl i{width:9px;height:9px;border-radius:2px;background:var(--kc,var(--accent));flex:0 0 auto}
+.kpicard .kv{display:block;margin:8px 0 0;font-family:Pretendard,system-ui,sans-serif;font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.kpicard .kv small{font-size:15px;font-weight:600;color:var(--ink-2);letter-spacing:0}
+.kpicard .ks{display:block;margin-top:8px;font-size:11px;color:var(--ink-3);line-height:1.55}
+.kpicard .ks b{color:var(--ink-2);font-weight:600}
+.kpinote{font-size:11.5px;color:var(--ink-3);line-height:1.6;background:var(--band);border-radius:var(--r-sm);padding:10px 12px;margin:0 0 8px}
+.planbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 20px;background:var(--band);border-bottom:1px solid var(--rule-2);font-size:12px}
+.planbar label{color:var(--ink-2);font-weight:600}
+.planbar input{width:74px;font:inherit;font-size:12px;text-align:right;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-sm);padding:3px 8px;font-variant-numeric:tabular-nums}
+.planbar .psum{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.planbar .psum b{color:var(--ink);font-weight:600}
+.planbar .pbtn{font:inherit;font-size:11.5px;font-weight:600;color:var(--ink-2);background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-sm);padding:4px 11px;cursor:pointer;white-space:nowrap}
+.planbar .pbtn:hover{border-color:var(--g600);color:var(--ink)}
+.planbar .sp{margin-left:auto}
+.kcard .kmeta{display:flex;align-items:center;gap:6px;margin-top:7px}
+.kpri{font-size:9.5px;font-weight:700;color:#fff;background:var(--pc,var(--accent));border-radius:3px;padding:1px 6px;cursor:pointer;letter-spacing:.02em}
+.ksz{font-size:9.5px;font-weight:700;color:var(--ink-2);border:1px solid var(--rule-2);border-radius:3px;padding:1px 6px;cursor:pointer;font-variant-numeric:tabular-nums}
+.kcard.over{opacity:.5}
+.cutline{display:flex;align-items:center;gap:8px;margin:11px 2px;font-size:10px;font-weight:700;color:var(--warn);letter-spacing:.02em;white-space:nowrap}
+.cutline::before,.cutline::after{content:"";height:1px;background:var(--warn);flex:1;opacity:.45}
+.ppreview{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-md);margin:12px 20px;padding:12px 14px;font-size:11.5px;line-height:1.6;color:var(--ink-2);max-height:320px;overflow:auto}
+.ppreview h4{margin:0 0 8px;font-size:12.5px;color:var(--ink)}
+.ppreview .row{padding:6px 0;border-top:1px solid var(--rule)}
+.ppreview .row b{color:var(--ink)}
+.ppreview .lab{display:inline-block;font-size:10px;font-weight:700;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:3px;padding:0 5px;margin:0 3px 0 0}
 .glede b{color:var(--ink);font-weight:600}
 /* ── FT 흐름 : 차트 ── */
 :root{--c-in:#0070f3; --c-done:#0e8f63}
@@ -234,7 +264,7 @@ body.fold .obar{transform:translateY(calc(-100% - 4px));opacity:0;pointer-events
 .tmh .r2{display:block;margin-top:2px;font-family:"Geist Mono",ui-monospace,monospace;font-size:10px;
   color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden}
 
-.tmbar{display:flex;flex-direction:column;gap:11px;align-items:stretch;margin:0 0 16px}
+.tmbar{display:flex;flex-flow:row wrap;column-gap:20px;row-gap:8px;align-items:center;margin:0 0 16px}.tmbar .r{position:relative}.tmbar .r+.r::before{content:"";position:absolute;left:-10px;top:50%;transform:translateY(-50%);height:14px;width:1px;background:var(--rule-2)}
 .tmbar .r{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
 .fgrp{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
 .tmbar .osel{font:inherit;font-size:12px;color:var(--ink);background:var(--sunk);
@@ -455,8 +485,8 @@ ol.lnk .lm{color:var(--ink-3);font-size:11px;font-variant-numeric:tabular-nums;w
 #teams.solo .mrow{border-bottom:0}
 .frow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
 .top-r2>.frow{flex:1 1 auto}
-.flab{flex:0 0 auto;min-width:38px;font-family:Pretendard,system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
-  font-weight:700;text-transform:uppercase;color:var(--ink-2);margin-right:7px}
+.flab{flex:0 0 auto;font-family:Pretendard,system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
+  font-weight:700;text-transform:uppercase;color:var(--ink-2);margin-right:2px}
 .fbtn{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--ink);
   background:transparent;border:1px solid var(--rule);border-radius:var(--r-sm);padding:2px 8px;cursor:pointer;
   line-height:1.6;white-space:nowrap}
