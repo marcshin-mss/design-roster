@@ -476,6 +476,33 @@ ol.lnk .lm{color:var(--ink-3);font-size:11px;font-variant-numeric:tabular-nums;w
   letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .stat span{font-size:11px;color:var(--ink-3)}
 .stats .ssep{align-self:center;width:1px;height:15px;background:var(--rule-2);margin:0 4px;flex:0 0 auto}
+/* 지표 탭 — 접근 제한 게이트 + 팀 비교 */
+.mgate{display:flex;justify-content:center;padding:44px 16px}
+.mgbox{max-width:360px;width:100%;text-align:center;background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:28px 24px}
+.mgicon{font-size:24px}
+.mgbox h3{margin:8px 0 4px;font-size:15px;letter-spacing:-.02em}
+.mgbox>p{font-size:12.5px;color:var(--ink-3);margin:0 0 14px;line-height:1.6}
+#mgform{display:flex;gap:8px}
+#mgpw{flex:1;min-width:0;font:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--rule);border-radius:9px;background:var(--plane);color:var(--ink)}
+#mgform button{font:inherit;font-size:13px;font-weight:600;padding:9px 18px;border:0;border-radius:9px;background:var(--g600);color:#fff;cursor:pointer;white-space:nowrap}
+#mgform button:hover{filter:brightness(1.05)}
+.mgmsg{color:var(--warn);font-size:12px;min-height:16px;margin:10px 0 0!important}
+.tcmp-h{margin:28px 0 4px;font-size:14px;font-weight:700;letter-spacing:-.02em}
+.tcmp-lede{margin-top:0!important}
+.tcmp{overflow-x:auto}
+.tcmp-svg{width:100%;max-width:700px;height:auto;display:block;margin:8px 0 16px}
+.tcmp-svg .ax{stroke:var(--rule-2);stroke-width:1}
+.tcmp-svg .ax100{stroke:var(--warn);stroke-width:1;stroke-dasharray:3 3;opacity:.55}
+.tcmp-svg .axt{fill:var(--ink-3);font-size:10px}
+.tcmp-svg .axl{fill:var(--warn);font-size:9.5px;opacity:.85}
+.tcmp-svg .axname{fill:var(--ink-2);font-size:11px;font-weight:600}
+.tcmp-svg .axp{fill:var(--ink);font-size:11px;font-weight:600}
+.tct{border-collapse:collapse;width:100%;font-size:12px;min-width:600px;font-variant-numeric:tabular-nums}
+.tct th,.tct td{border-bottom:1px solid var(--rule-2);padding:7px 9px;text-align:right;white-space:nowrap}
+.tct th:first-child,.tct td:first-child{text-align:left}
+.tct th{color:var(--ink-3);font-weight:600;font-size:11px;vertical-align:bottom;line-height:1.3}
+.tct th span{font-weight:400;font-size:9px}
+.tcdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
 
 .top-r2{display:flex;gap:8px;align-items:flex-start;padding:0 20px 9px;flex-wrap:wrap}
 .top-r2:last-of-type{padding-bottom:13px}
