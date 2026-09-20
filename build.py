@@ -350,6 +350,12 @@ def main():
                 badges = [b for b in d.get("badges", [])]
                 if any(is_cbp(r[0]) for r in rows) and "CBP" not in badges:
                     badges.append("CBP")
+                # PEL — 디자인 조직 자동화/툴링 이니셔티브: PEL 프로젝트 티켓이 붙은 과제 (티켓 생기면 자동 반영)
+                if any(str(r[0]).startswith("PEL-") for r in rows) and "PEL" not in badges:
+                    badges.append("PEL")
+                # design-driven — 디자인 발의(FT)로 취급
+                if "design-driven" in tname.lower() and "FT" not in badges:
+                    badges.append("FT")
                 pk = {r[4] for r in rows if r[4]}
                 pf = d.get("platform", "무신사")
                 if pk and pk <= M29:
