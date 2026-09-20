@@ -250,6 +250,33 @@ def main():
             if t.startswith(p):
                 t = t[len(p):].strip()
         return t or summ.strip()
+
+    # 도메인 추론 — 기타 서비스로 떨어질 과제/QA 티켓을 제목·티켓 내용으로 실제 도메인에 배치한다.
+    #  위에서부터 먼저 걸리는 규칙 하나로 도메인을 정한다(구체적 → 일반). 아무것도 안 걸리면 기타 서비스.
+    DOMAIN_RULES = [
+        (r"B2B", "기타 서비스"),
+        (r"\[AI\]|트래커\s*자동화|워터마크|에이전트|AI\s*Native|AI네이티브|LLM", "AI 제품"),
+        (r"유즈드|USED|중고", "유즈드"),
+        (r"무진장", "무진장"),
+        (r"글로벌\s*원앱|원앱|One-?App", "글로벌 원앱"),
+        (r"해외|글로벌", "글로벌"),
+        (r"검색|랭킹|브랜드숍|브랜드\s*인덱스|PLP|SRP|전시|딥링크|브릿지|추천판|전문관|디스커버리|필터", "탐색·검색"),
+        (r"주문|클레임|장바구니|주문서|PDP|결제|배송|쿠폰|매입|스토어\s*출고|재고|오프라인|매장|무탠다드|29Connect|커머스|판매가", "커머스·주문결제"),
+        (r"앱테크|엡테크|출석|래플|좋아요|최근본|알림|체험단|적립|케이뱅크|미션|이벤트딜", "앱테크·혜택"),
+        (r"마이|FAQ|문의하기|1:1\s*문의|커뮤니티|스냅|후기|댓글|프로필|콘텐츠판|매거진", "마이·커뮤니티"),
+        (r"광고|\bDA\b|캠페인|기획전|브랜딩|룩북|이메일|\bCBP\b", "브랜드광고·캠페인"),
+        (r"VOC|리서치|서베이|설문|유저\s*테스트|사용성", "리서치·VOC"),
+        (r"서체|폰트|컴포넌트|MDS|디자인\s*시스템|아이콘|디자인\s*가이드|인디케이터|헬스체크|밀도감", "공통UX"),
+    ]
+    _DOMAIN_RULES = [(re.compile(p, re.I), dom) for p, dom in DOMAIN_RULES]
+
+    def guess_domain(title, ticket_titles):
+        hay = (title or "") + " " + " ".join(ticket_titles or [])
+        for rx, dom in _DOMAIN_RULES:
+            if rx.search(hay):
+                return dom
+        return "기타 서비스"
+
     per = {}          # 담당자 → 과제명 → [티켓]
     hold, done = {}, {}
     fresh = []
@@ -282,7 +309,12 @@ def main():
                     fresh.append(tname)
                 anchor[root] = tname
             elif is_qa(summ):
-                tname = BUCKET
+                # QA 는 성격(QA)으로 두되, 도메인은 티켓 내용 기준으로 분산한다 → 도메인별 QA 버킷
+                qdom = guess_domain(summ, [summ])
+                tname = BUCKET + " · " + qdom
+                if tname not in tax["tasks"]:
+                    tax["tasks"][tname] = {"domain": qdom, "badges": ["QA"], "initiative": None,
+                                           "platform": "무신사", "bucket": True, "anchors": []}
             else:
                 # 기타 개선 건 — 티켓 하나를 과제 하나로 본다 (다른 과제와 같은 규칙 적용)
                 tname = clean_name(summ)
@@ -315,11 +347,13 @@ def main():
         if "오너" not in tax["tasks"][summ]["badges"]:
             tax["tasks"][summ]["badges"].append("오너")
 
-    # ── 5.5 디자인QA 는 '성격(QA)'으로만 다룬다 — 도메인은 서비스 영역이 아니므로 기타 서비스에 둔다 ──
-    if BUCKET in tax["tasks"]:
-        tax["tasks"][BUCKET]["domain"] = "기타 서비스"
-        tax["tasks"][BUCKET]["badges"] = ["QA"]
-    # FT·디자인QA 는 도메인 축에서 뺀다 (성격 축에만 남긴다)
+    # ── 5.5 디자인QA 는 '성격(QA)' 고정 + 도메인은 티켓 내용 기준(버킷명에 이미 반영) ──
+    #   과거 단일 "디자인QA" 버킷은 도메인별 "디자인QA · <도메인>" 버킷으로 분산한다.
+    for tn, e in list(tax["tasks"].items()):
+        if tn == BUCKET or tn.startswith(BUCKET + " · "):
+            e["badges"] = ["QA"]
+            e["bucket"] = True
+    # FT·디자인QA(단일) 는 도메인 축 themes 에서 뺀다 (성격 축에만 남긴다)
     tax["themes"] = [th for th in tax["themes"] if th["k"] not in ("FT", "디자인QA")]
 
     # ── 6. D 조립 ──────────────────────────────────────────────────
@@ -362,7 +396,12 @@ def main():
                     pf = "29CM"
                 elif pk & M29:
                     pf = "공통"
-                x = {"t": tname, "th": d.get("domain", "기타 서비스"), "b": badges,
+                dom = d.get("domain", "기타 서비스")
+                # 기타 서비스로 떨어진 과제(오너 에픽·자동 신규건 등)는 내용으로 실제 도메인 추론
+                is_bucket = d.get("bucket") or tname == BUCKET or tname.startswith(BUCKET + " · ")
+                if dom == "기타 서비스" and not is_bucket:
+                    dom = guess_domain(tname, [r[1] for r in rows])
+                x = {"t": tname, "th": dom, "b": badges,
                      "init": d.get("initiative"), "pf": pf,
                      "tk": [[r[0], r[1], r[2], None] for r in rows],
                      "it": [r[1] for r in rows]}
