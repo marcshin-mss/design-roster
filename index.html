@@ -722,14 +722,14 @@ footer{padding:22px 20px 0;max-width:76ch}
 #app.off{display:none}
 </style>
 <div id="gate">
-  <form class="gbx" id="gform" autocomplete="off">
+  <div class="gbx">
     <h1>BizNP Product Design</h1>
-    <p>디자인실 워크로드 대시보드입니다. 사내 인원·과제 정보가 담겨 있어 비밀번호로 잠겨 있습니다.</p>
-    <input id="gpw" type="password" placeholder="비밀번호" aria-label="비밀번호" autocomplete="off">
-    <button type="submit">열기</button>
+    <p>디자인실 워크로드 대시보드입니다. 회사 계정으로 로그인하세요.</p>
+    <div id="gbtn" style="display:flex;justify-content:center;margin:14px 0 2px"></div>
     <span class="gmsg" id="gmsg"></span>
-  </form>
+  </div>
 </div>
+<script src="https://accounts.google.com/gsi/client" async></script>
 <div id="shell"></div>
 <script id="data" type="application/json"></script></div>
 <script id="app-src" type="text/plain"></script>
@@ -737,7 +737,8 @@ footer{padding:22px 20px 0;max-width:76ch}
 /* ── 부트스트랩 ──────────────────────────────────────────────
    data.json(암호화 가능) 과 basis.json 을 받아 앱을 띄운다. */
 const $=id=>document.getElementById(id);
-const gate=$("gate"), gmsg=$("gmsg"), gpw=$("gpw");
+const gate=$("gate"), gmsg=$("gmsg");
+const GCID="830037153887-18a8gh7nbeukd1rrsrb6vkt5l6uguf5i.apps.googleusercontent.com";
 function say(t,ok){ gmsg.textContent=t; gmsg.className="gmsg"+(ok?" ok":""); }
 const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 
@@ -799,28 +800,51 @@ function boot(dataText,basis){
     if(!a.ok) throw new Error("파일을 받지 못했습니다");
     window.__DTAG=a.headers.get("etag")||a.headers.get("last-modified")||"";
     raw=await a.json();
-  }catch(e){ say("데이터를 불러오지 못했습니다 — "+e.message); gpw.disabled=true; return; }
+  }catch(e){ say("데이터를 불러오지 못했습니다 — "+e.message); return; }
   if(!raw.enc){                       // 평문(로컬 테스트)
-    try{ await loadApp(null); }catch(e){ say("앱을 불러오지 못했습니다 — "+e.message); gpw.disabled=true; return; }
+    try{ await loadApp(null); }catch(e){ say("앱을 불러오지 못했습니다 — "+e.message); return; }
     boot(JSON.stringify(raw),raw.basis||{}); return;
   }
-  const saved=(()=>{try{return sessionStorage.getItem("pxd-pw")||""}catch(e){return""}})();
   const tryPw=async pw=>{
     try{ const txt=await decrypt(raw,pw);
          await loadApp(pw);
-         try{sessionStorage.setItem("pxd-pw",pw)}catch(e){}
-         window.__PW=pw;                       // basis.enc 를 다시 잠글 때 쓴다
+         window.__PW=pw;
          boot(txt,JSON.parse(txt).basis||{}); return true; }
     catch(e){ return false; }
   };
-  if(saved && await tryPw(saved)) return;
-  gpw.focus();
-  $("gform").addEventListener("submit",async ev=>{
-    ev.preventDefault();
-    const pw=gpw.value; if(!pw)return;
-    say("여는 중…",true);
-    if(!await tryPw(pw)){ say("비밀번호가 맞지 않습니다."); gpw.select(); }
-  });
+  // 세션 내 빠른 경로 — 이미 받은 키 재사용
+  const savedKey=(()=>{try{return sessionStorage.getItem("pxd-key")||""}catch(e){return""}})();
+  if(savedKey){
+    try{ const m=JSON.parse(sessionStorage.getItem("pxd-me")||"{}");
+         window.__ME_EMAIL=m.email; window.__KPI_OK=!!m.kpi; window.__ADMIN=!!m.admin; }catch(e){}
+    if(await tryPw(savedKey)) return;
+  }
+  // 회사 계정 구글 로그인
+  const AUTH=()=>(window.__SYNC&&window.__SYNC.url?window.__SYNC.url:"")+"/auth";
+  window.__onCred=async(resp)=>{
+    say("확인 중…",true);
+    try{
+      const r=await fetch(AUTH(),{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({credential:(resp&&resp.credential)||""})});
+      if(r.status===403){ say("회사 계정(musinsa.com·29cm.co.kr)만 접근할 수 있습니다."); return; }
+      if(!r.ok){ say("로그인 확인에 실패했습니다. 잠시 후 다시 시도하세요."); return; }
+      const d=await r.json();
+      if(!d.ok||!d.key){ say("접근 권한이 없습니다."); return; }
+      window.__ME_EMAIL=d.email; window.__KPI_OK=!!d.kpi; window.__ADMIN=!!d.admin; window.__CRED=(resp&&resp.credential)||"";
+      if(await tryPw(d.key)){
+        try{ sessionStorage.setItem("pxd-key",d.key);
+             sessionStorage.setItem("pxd-me",JSON.stringify({email:d.email,kpi:d.kpi,admin:d.admin})); }catch(e){}
+      } else say("데이터를 여는 중 문제가 발생했습니다.");
+    }catch(e){ say("로그인 중 오류가 발생했습니다."); }
+  };
+  (function initG(){
+    if(!(window.google&&window.google.accounts&&window.google.accounts.id)){ return void setTimeout(initG,200); }
+    try{
+      google.accounts.id.initialize({client_id:GCID,callback:window.__onCred,auto_select:true,itp_support:true});
+      google.accounts.id.renderButton(document.getElementById("gbtn"),{theme:"filled_blue",size:"large",type:"standard",text:"signin_with",shape:"pill"});
+      google.accounts.id.prompt();
+    }catch(e){ say("구글 로그인을 불러오지 못했습니다."); }
+  })();
 })();
 </script>
 
