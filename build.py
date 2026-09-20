@@ -163,6 +163,14 @@ def main():
         sys.exit("taxonomy.enc 도 taxonomy.json 도 없습니다.")
     teams = tax["teams"]
     people = {m["name"]: (t, m) for t in teams for m in t["members"]}
+    basisNow = load_sealed("basis") or {"tasks": {}}   # 완료 건 사이즈 태깅·히스토리용 조기 로드
+    def _dnrow(d2):
+        tn = d2[5] if len(d2) > 5 else None
+        e = (basisNow.get("tasks") or {}).get(tn) if tn else None
+        band = e.get("size") if e else None
+        md = round((e.get("hours") or 0) / 8.0, 2) if e else None
+        return [d2[0], d2[1], d2[2], (d2[3] if len(d2) > 3 else None),
+                (d2[4] if len(d2) > 4 else None), band, md]
     accts  = [m["account"] for t in teams for m in t["members"] if m.get("account")]
     leads  = {m["name"]: m["account"] for t in teams for m in t["members"]
               if m.get("lead") and m.get("account")}
@@ -292,7 +300,8 @@ def main():
             continue
         if st == "완료":
             if day(F(n, "created")) >= CUT and (day(F(n, "resolutiondate")) or "") >= CUT:
-                done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created"))])
+                _tn = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
+                done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created")), _tn])
             continue
         tname = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
         if not tname:
@@ -338,7 +347,7 @@ def main():
         if st == "보류":
             hold.setdefault(who, []).append([key, summ, "HOLD", "", day(F(n, "created"))]); continue
         if st == "완료":
-            done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created"))]); continue
+            done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created")), summ]); continue
         per.setdefault(who, {})[summ] = [[key, summ, st, None, F(n, "project", "key")]]
         tax["tasks"].setdefault(summ, {"domain": "기타 서비스", "badges": ["오너"], "initiative": None,
                                        "platform": "29CM" if F(n, "project", "key") in M29 else "무신사",
@@ -419,7 +428,7 @@ def main():
             tm["members"].append({
                 "name": who, "role": m.get("role", ""), "lead": bool(m.get("lead")),
                 "tasks": tasks, "n": sum(len(x["tk"]) for x in tasks),
-                "hd": hold.get(who, []), "dn": [[d2[0], d2[1], d2[2], (d2[3] if len(d2)>3 else None), (d2[4] if len(d2)>4 else None)] for d2 in done.get(who, [])],
+                "hd": hold.get(who, []), "dn": [_dnrow(d2) for d2 in done.get(who, [])],
                 "wk": 0, "over": 0, "md": 0})
         tm["members"].sort(key=lambda m2: (1 if m2["lead"] else 0, -m2["n"], m2["name"]))
         tm["hold"] = sum(len(m2["hd"]) for m2 in tm["members"])
@@ -461,15 +470,63 @@ def main():
     D["one"] = load_sealed("one") or []
     D["nodN"] = len(D["one"])
 
+    # ── 7.7 스냅샷 히스토리 (팀별 속도 추세용 — 날짜별 1건 upsert) ──
+    try:
+        def _med(a):
+            a = sorted(v for v in a if v is not None and v >= 0)
+            return None if not a else (a[len(a)//2] if len(a) % 2 else (a[len(a)//2-1]+a[len(a)//2])/2)
+        _today = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d")
+        snap = {}
+        for tm in D["teams"]:
+            mem = [m for m in tm["members"] if not m.get("lead")]
+            leads = []
+            doneN = 0
+            for m in tm["members"]:
+                for r in m.get("dn", []):
+                    doneN += 1
+                    rv = r[3] if len(r) > 3 else None
+                    cv = r[4] if len(r) > 4 else None
+                    if rv and cv:
+                        try:
+                            dd = (datetime.date.fromisoformat(rv) - datetime.date.fromisoformat(cv)).days
+                            if dd >= 0:
+                                leads.append(dd)
+                        except Exception:
+                            pass
+            actMd = 0.0
+            actN = 0
+            for m in mem:
+                for x in m.get("tasks", []):
+                    if x.get("a", 0) > 0:
+                        e = (basisNow.get("tasks") or {}).get(x["t"])
+                        actMd += ((e.get("hours") if e else 9) or 9) / 8.0
+                        actN += 1
+            lm = _med(leads)
+            avg = round(actMd/actN, 2) if actN else 0
+            snap[tm["k"]] = {"n": len(mem), "doneN": doneN, "leadMed": lm,
+                             "avgMd": avg, "loadMd": round(actMd, 1),
+                             "spd": round(lm/avg, 2) if (lm is not None and avg > 0) else None}
+        _HIST_SNAP = {"date": _today, "teams": snap}   # basis._hist 에 upsert (8단계)
+    except Exception as _e:
+        _HIST_SNAP = None
+        print("history 스냅샷 건너뜀:", _e)
+
     # ── 8. 저장 ────────────────────────────────────────────────────
     save_sealed("taxonomy", tax)
     basis = load_sealed("basis") or {}
     basis.setdefault("tasks", {})
     for tname in tax["tasks"]:
         basis["tasks"].setdefault(tname, {"size": "M", "hours": 9, "provisional": True})
+    # 팀별 속도 추세 히스토리는 basis 안에 함께 저장(별도 파일 불필요 → 워크플로 수정 불필요)
+    if _HIST_SNAP:
+        h = basis.setdefault("_hist", {"days": []})
+        h["days"] = [d for d in h.get("days", []) if d.get("date") != _HIST_SNAP["date"]]
+        h["days"].append(_HIST_SNAP)
+        h["days"] = h["days"][-120:]
+        print("history 스냅샷: %s (%d일치, basis 내장)" % (_HIST_SNAP["date"], len(h["days"])))
     save_sealed("basis", basis)
 
-    D["basis"] = basis          # 페이지는 이 번들 하나만 받는다
+    D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     out = os.path.join(HERE, "data.json")
     if GATE:
