@@ -285,6 +285,28 @@ def main():
                 return dom
         return "기타 서비스"
 
+    # FT(FastTrack) 판정 — 디자인 발의(design-driven)에 국한하지 않는다.
+    #   실무 티켓/조상이 FT 프로젝트이거나 fast-track 계열 라벨·요약 마커를 가지면 FT 성격으로 본다.
+    FT_LABELS = {"fasttrack", "fast-track-away", "fast-track-home", "pel-fast-track",
+                 "design-driven", "ux-ft", "ux-ft-backlog"}
+    FT_MARK = re.compile(r"\[FT[-\s]|FT\s*팔로업|SNAP\s*FT|design-driven", re.I)
+
+    def is_ft(rows):
+        for r in rows:
+            key = r[0]; summ = r[1] or ""; proj = str(r[4] or "")
+            if proj == "FT" or str(key).startswith("FT-"):
+                return True
+            for a in [key] + chain(key):
+                if str(a).startswith("FT-"):
+                    return True
+                nn = meta.get(a)
+                if nn and any(str(l).lower() in FT_LABELS
+                              for l in (F(nn, "labels", default=[]) or [])):
+                    return True
+            if FT_MARK.search(summ):
+                return True
+        return False
+
     per = {}          # 담당자 → 과제명 → [티켓]
     hold, done = {}, {}
     fresh = []
@@ -396,8 +418,11 @@ def main():
                 # PEL — 디자인 조직 자동화/툴링 이니셔티브: PEL 프로젝트 티켓이 붙은 과제 (티켓 생기면 자동 반영)
                 if any(str(r[0]).startswith("PEL-") for r in rows) and "PEL" not in badges:
                     badges.append("PEL")
-                # design-driven — 디자인 발의(FT)로 취급
-                if "design-driven" in tname.lower() and "FT" not in badges:
+                # FT(FastTrack) — 티켓/조상의 FT 프로젝트·fast-track 라벨·마커로 판정.
+                #   과거 수기 FT 태그는 버리고 티켓 기준으로 다시 매긴다(모든 데이터 일관).
+                if "FT" in badges:
+                    badges.remove("FT")
+                if is_ft(rows):
                     badges.append("FT")
                 pk = {r[4] for r in rows if r[4]}
                 pf = d.get("platform", "무신사")
