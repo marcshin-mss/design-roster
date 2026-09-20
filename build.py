@@ -72,6 +72,16 @@ def day(v):
     return v[:10] if v else None
 
 
+def quarter_of(d):
+    """'2026-09-01' → '26 3Q' (분기 = 생성일 기준). 날짜 없으면 ''."""
+    if not d or len(d) < 7:
+        return ""
+    try:
+        return "%s %dQ" % (d[2:4], (int(d[5:7]) - 1) // 3 + 1)
+    except Exception:
+        return ""
+
+
 def org_of(display):
     """'최보경/Core-P Catalog bokyung.choi' → 'Core-P Catalog'"""
     if not display or "/" not in display:
@@ -352,6 +362,9 @@ def main():
                      "it": [r[1] for r in rows]}
                 x["n"] = len(x["tk"])
                 x["a"] = sum(1 for r in x["tk"] if r[2] == "진행 중")
+                _crs = [day(F(meta.get(r[0]) or {}, "created")) for r in rows]
+                _crs = [c for c in _crs if c]
+                x["q"] = quarter_of(min(_crs)) if _crs else ""
                 if d.get("bucket") or tname == BUCKET:
                     x["bkt"] = 1
                 if d.get("own"):
