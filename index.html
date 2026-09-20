@@ -729,7 +729,6 @@ footer{padding:22px 20px 0;max-width:76ch}
     <span class="gmsg" id="gmsg"></span>
   </div>
 </div>
-<script src="https://accounts.google.com/gsi/client" async></script>
 <div id="shell"></div>
 <script id="data" type="application/json"></script></div>
 <script id="app-src" type="text/plain"></script>
@@ -837,13 +836,38 @@ function boot(dataText,basis){
       } else say("데이터를 여는 중 문제가 발생했습니다.");
     }catch(e){ say("로그인 중 오류가 발생했습니다."); }
   };
-  (function initG(){
-    if(!(window.google&&window.google.accounts&&window.google.accounts.id)){ return void setTimeout(initG,200); }
-    try{
-      google.accounts.id.initialize({client_id:GCID,callback:window.__onCred,auto_select:true,itp_support:true});
-      google.accounts.id.renderButton(document.getElementById("gbtn"),{theme:"filled_blue",size:"large",type:"standard",text:"signin_with",shape:"pill"});
-      google.accounts.id.prompt();
-    }catch(e){ say("구글 로그인을 불러오지 못했습니다."); }
+  /* ── 회사 구글 계정 로그인 (리디렉션 방식 — 서드파티 쿠키/FedCM 불필요) ── */
+  const REDIR="https://marcshin-mss.github.io/design-roster/";
+  const AUTHZ="https://accounts.google.com/o/oauth2/v2/auth";
+  const rnd=()=>{const a=new Uint8Array(16);crypto.getRandomValues(a);return Array.from(a).map(x=>x.toString(16).padStart(2,"0")).join("");};
+  const jwtPayload=t=>{try{const p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(decodeURIComponent(escape(atob(p))));}catch(e){return null;}};
+  function startLogin(){
+    const nonce=rnd(); try{sessionStorage.setItem("pxd-nonce",nonce);}catch(e){}
+    const p=new URLSearchParams({client_id:GCID,redirect_uri:REDIR,response_type:"id_token",scope:"openid email profile",nonce:nonce,prompt:"select_account"});
+    location.href=AUTHZ+"?"+p.toString();
+  }
+  window.__startLogin=startLogin;
+  /* 구글에서 돌아온 경우 : id_token 처리 */
+  if(location.hash && location.hash.indexOf("id_token=")>=0){
+    const hp=new URLSearchParams(location.hash.slice(1));
+    const tok=hp.get("id_token");
+    try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+    let want=""; try{want=sessionStorage.getItem("pxd-nonce")||"";}catch(e){}
+    const pl=tok?jwtPayload(tok):null;
+    if(tok && pl && (!want || pl.nonce===want)){ try{sessionStorage.removeItem("pxd-nonce");}catch(e){} say("확인 중…",true); window.__onCred({credential:tok}); return; }
+    say("로그인 응답을 확인하지 못했습니다. 다시 시도해 주세요.");
+  }
+  /* 로그인 버튼 */
+  (function renderLoginBtn(){
+    const gb=document.getElementById("gbtn"); if(!gb) return;
+    const b=document.createElement("button");
+    b.type="button"; b.id="glogin";
+    b.style.cssText="display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:15px;font-weight:600;color:#3c4043;background:#fff;border:1px solid #dadce0;border-radius:9px;padding:12px 22px;cursor:pointer;width:100%;box-sizing:border-box;transition:background .15s,box-shadow .15s";
+    b.onmouseover=()=>{b.style.background="#f7f8f8";b.style.boxShadow="0 1px 2px rgba(60,64,67,.2)";};
+    b.onmouseout=()=>{b.style.background="#fff";b.style.boxShadow="none";};
+    b.innerHTML='<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" style="margin-right:10px;flex:none"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.28-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.46-9.9l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span>Google 계정으로 로그인</span>';
+    b.onclick=startLogin;
+    gb.innerHTML=""; gb.appendChild(b);
   })();
 })();
 </script>
