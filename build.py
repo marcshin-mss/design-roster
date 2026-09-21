@@ -178,7 +178,7 @@ def main():
     name_of = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
 
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
-           "created", "resolutiondate", "labels", "project"]
+           "created", "resolutiondate", "labels", "project", "updated"]
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -485,7 +485,8 @@ def main():
         st = F(n, "status", "name") or ""
         ft.append([n["key"], cr, day(F(n, "resolutiondate")), bucket_of(st), st,
                    who if who in people else (who or ""),
-                   tmof.get(who, "미배정" if not who else "그 외"), F(n, "summary") or ""])
+                   tmof.get(who, "미배정" if not who else "그 외"), F(n, "summary") or "",
+                   day(F(n, "updated"))])
     ft.sort(key=lambda r: (r[1], r[0]))
     D["ft"] = ft
     print(f"FT {len(ft)}건")
