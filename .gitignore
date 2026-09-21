@@ -7,5 +7,4 @@ basis.json
 slack.json
 one.json
 app.json
-deploy-agent.log
-.deploy-request
+runway.json

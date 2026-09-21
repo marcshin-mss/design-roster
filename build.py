@@ -496,6 +496,21 @@ def main():
     D["one"] = load_sealed("one") or []
     D["nodN"] = len(D["one"])
 
+    # ── 7.5 예정 디자인 수요 (runway 분기 플래닝 스냅샷) ──
+    #   runway 내부 데이터(디자인 디펜던시 팀 지정)는 Jira에 없어 스냅샷으로 봉인해 둔다(runway.enc).
+    #   Biz-P 디자인 4팀이 메인/디펜던시로 붙은 이니셔티브만 남긴다(타 조직 디자인팀 제외).
+    _rw = load_sealed("runway") or {}
+    BIZ_DESIGN = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design"}
+    _rwr = []
+    for r in (_rw.get("rows") or []):
+        keep = [t for t in (r.get("t") or []) if t.replace("*", "").strip() in BIZ_DESIGN]
+        if not keep:
+            continue
+        r = dict(r); r["t"] = [t.replace("*", "").strip() for t in keep]
+        _rwr.append(r)
+    D["rwq"] = {"asof": _rw.get("asof", ""), "rows": _rwr}
+    print(f"runway 예정 디자인 수요 {len(_rwr)}건")
+
     # ── 7.7 스냅샷 히스토리 (팀별 속도 추세용 — 날짜별 1건 upsert) ──
     try:
         def _med(a):
