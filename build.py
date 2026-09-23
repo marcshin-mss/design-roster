@@ -635,6 +635,80 @@ def main():
         except Exception as _e:
             print("사이즈 스냅샷 건너뜀:", _e)
 
+    # ── 8.6 주간 리소스(활용률) 스냅샷 (매주 금 20시 KST — 멤버별 부하·가용) ──
+    #   대시보드 loadPass(now) 와 동일 산식으로 멤버별 이번 주 부하(md)와 가용(md)을 기록.
+    #   basis._loadhist = {weeks:[{w,d}...최근26], mem:{"<이름>":{t:"<팀키>", w:{"2026-W39":[loadmd,capmd]}}}}
+    #   조직·팀 추이는 멤버 합으로 유도(대시보드), 개인 추이는 이번 주부터 누적.
+    if os.environ.get("SNAP_WEEK") == "1":
+        try:
+            now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            iso = now_kst.isocalendar()
+            wk = "%04d-W%02d" % (iso[0], iso[1])
+            lh = basis.setdefault("_loadhist", {"weeks": [], "mem": {}})
+            lweeks = lh.setdefault("weeks", [])
+            lmem = lh.setdefault("mem", {})
+            done_w = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
+            if wk in done_w:
+                print("리소스 스냅샷: %s 이미 기록됨 — 건너뜀" % wk)
+            else:
+                SEP = "\u0001"
+                ovr = fetch_overrides()
+                bands = basis.get("size_bands") or {"XS": 2, "S": 5, "M": 10, "L": 18, "XL": 30}
+                week_h = basis.get("week_hours", 40)
+                np_def = basis.get("nonproject_hours", 8)
+                NPT = basis.get("nonproject_by_team") or {}
+                ftmul = basis.get("ft_multiplier", 1.5)
+
+                def _npOf(k):
+                    v = NPT.get(k)
+                    return v if isinstance(v, (int, float)) else np_def
+
+                def _availMd(k):
+                    return max(0.25, (week_h - _npOf(k)) / 8.0)
+
+                def _effHours(tname, who):
+                    d0 = ((basis["tasks"].get(tname) or {}).get("size")) or "M"
+                    d1 = (basis["tasks"].get(tname) or {}).get("hours", 9)
+                    split = tname.startswith("디자인QA")
+                    u = ovr.get(tname + SEP + who) if (split and ovr.get(tname + SEP + who)) else ovr.get(tname)
+                    if not isinstance(u, dict):
+                        u = {}
+                    if u.get("h") is not None:
+                        return u["h"]
+                    if u.get("s"):
+                        return bands.get(u["s"], d1)
+                    return d1
+
+                lweeks.append({"w": wk, "d": now_kst.strftime("%Y-%m-%d")})
+                for tm in D["teams"]:
+                    k = tm["k"]
+                    cap = round(_availMd(k), 2)
+                    for m in tm["members"]:
+                        who = m["name"]
+                        nonft, ftv = 0.0, []
+                        for x in m.get("tasks", []):
+                            if x.get("own") or (x.get("a", 0) or 0) <= 0:
+                                continue
+                            v = _effHours(x["t"], who) / 8.0
+                            if "FT" in (x.get("b") or []):
+                                ftv.append(v)
+                            else:
+                                nonft += v
+                        ftv.sort(reverse=True)
+                        w = nonft + sum(v * (ftmul ** i) for i, v in enumerate(ftv))
+                        lmem.setdefault(who, {"t": k, "w": {}})
+                        lmem[who]["t"] = k
+                        lmem[who]["w"][wk] = [round(w, 2), cap]
+                lweeks[:] = lweeks[-26:]
+                keepw = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
+                for who in list(lmem.keys()):
+                    lmem[who]["w"] = {w: v for w, v in lmem[who]["w"].items() if w in keepw}
+                    if not lmem[who]["w"]:
+                        del lmem[who]
+                print("리소스 스냅샷: %s (%d명)" % (wk, len(lmem)))
+        except Exception as _e:
+            print("리소스 스냅샷 건너뜀:", _e)
+
     save_sealed("basis", basis)
 
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
