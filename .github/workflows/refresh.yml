@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "*/30 22,23 * * 0-4"       # 평일 07:00~08:30 KST
     - cron: "*/30 0-13 * * 1-5"        # 평일 09:00~22:30 KST
+    - cron: "0 11 * * 5"               # 금 20:00 KST — 주간 사이즈 스냅샷 확정
   workflow_dispatch:                    # Actions 탭에서 수동 실행
   push:
     branches: [main]                        # main 에 뭘 올리든 다시 빌드하고 배포한다
@@ -26,6 +27,16 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install cryptography
+      - name: 주간 스냅샷 판단 (금 20시 KST)
+        run: |
+          KD=$(TZ=Asia/Seoul date +%u)   # 1=월 … 7=일
+          KH=$(TZ=Asia/Seoul date +%H)   # 00…23
+          if [ "$KD" = "5" ] && [ "$KH" = "20" ]; then
+            echo "SNAP_WEEK=1" >> "$GITHUB_ENV"
+            echo "금 20시 KST — 이번 실행에서 주간 사이즈 스냅샷을 남깁니다."
+          else
+            echo "일반 갱신 (요일=$KD 시각=$KH KST) — 사이즈 스냅샷 없음"
+          fi
       - name: 지라에서 읽어 data.json 생성
         env:
           JIRA_BASE:  ${{ secrets.JIRA_BASE }}

@@ -120,6 +120,29 @@ def decrypt(box: dict, password: str) -> str:
     return AESGCM(key).decrypt(b(box["iv"]), b(box["ct"]), None).decode()
 
 
+SYNC_URL = "https://design-roster-sync.marc-shin.workers.dev/"
+
+
+def fetch_overrides():
+    """워커 공유 기준(담당자가 조정한 sz 오버라이드)을 가져와 복호화한다.
+    실패하면 {} — 스냅샷은 base 사이즈만으로도 남는다."""
+    if not GATE:
+        return {}
+    try:
+        req = urllib.request.Request(
+            SYNC_URL, headers={"User-Agent": "Mozilla/5.0 design-roster-snap"})
+        raw = urllib.request.urlopen(req, timeout=30).read().decode()
+        box = json.loads(raw)
+        if not box or not box.get("ct"):
+            return {}
+        d = json.loads(decrypt(box, GATE))
+        sz = d.get("sz")
+        return sz if isinstance(sz, dict) else {}
+    except Exception as e:
+        print("오버라이드 가져오기 실패(무시):", e)
+        return {}
+
+
 def load_sealed(name):
     """name.enc(암호화) 우선, 없으면 name.json(평문). 둘 다 없으면 None."""
     p = os.path.join(HERE, name + ".enc")
@@ -565,6 +588,49 @@ def main():
         h["days"].append(_HIST_SNAP)
         h["days"] = h["days"][-120:]
         print("history 스냅샷: %s (%d일치, basis 내장)" % (_HIST_SNAP["date"], len(h["days"])))
+
+    # ── 8.5 주간 사이즈 스냅샷 (매주 금 20시 KST — 담당자 조정값의 '최종'을 1건 기록) ──
+    #   SNAP_WEEK=1 (워크플로가 금 20시 KST 실행에만 세팅) 일 때만 남긴다.
+    #   실효 사이즈 = 워커 공유 오버라이드(sz) 우선, 없으면 basis.tasks 기본값.
+    #   basis._sizehist = {weeks:[{w,d}...최근26], wk:{<키>:{"2026-W39":"L"}}}
+    #   <키>: 과제명 (담당자별로 나뉘는 디자인QA 는 "과제명\u0001담당자" 키도 함께).
+    if os.environ.get("SNAP_WEEK") == "1":
+        try:
+            now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            iso = now_kst.isocalendar()
+            wk = "%04d-W%02d" % (iso[0], iso[1])
+            sh = basis.setdefault("_sizehist", {"weeks": [], "wk": {}})
+            weeks = sh.setdefault("weeks", [])
+            wkmap = sh.setdefault("wk", {})
+            done_w = {(w.get("w") if isinstance(w, dict) else w) for w in weeks}
+            if wk in done_w:
+                print("사이즈 스냅샷: %s 이미 기록됨 — 건너뜀" % wk)
+            else:
+                SEP = "\u0001"
+                ovr = fetch_overrides()
+                eff = {}
+                for tname, ent in (basis.get("tasks") or {}).items():
+                    base = (ent or {}).get("size") or "M"
+                    u = ovr.get(tname)
+                    s = (u.get("s") if isinstance(u, dict) else None) or base
+                    if s:
+                        eff[tname] = s
+                for k, u in ovr.items():
+                    if SEP in k and isinstance(u, dict) and u.get("s"):
+                        eff[k] = u["s"]
+                weeks.append({"w": wk, "d": now_kst.strftime("%Y-%m-%d")})
+                for k, s in eff.items():
+                    wkmap.setdefault(k, {})[wk] = s
+                weeks[:] = weeks[-26:]
+                keep = {(w.get("w") if isinstance(w, dict) else w) for w in weeks}
+                for k in list(wkmap.keys()):
+                    wkmap[k] = {w: v for w, v in wkmap[k].items() if w in keep}
+                    if not wkmap[k]:
+                        del wkmap[k]
+                print("사이즈 스냅샷: %s (%d과제, 오버라이드 %d건)" % (wk, len(eff), len(ovr)))
+        except Exception as _e:
+            print("사이즈 스냅샷 건너뜀:", _e)
+
     save_sealed("basis", basis)
 
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
