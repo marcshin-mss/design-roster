@@ -348,6 +348,8 @@ def main():
                 _tn = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
                 done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created")), _tn])
             continue
+        if st == "예정" and (F(n, "status", "name") or "") != "SUGGESTED":
+            continue   # 팀별 과제의 '예정'은 SUGGESTED 상태만 (Backlog·할일 등 제외)
         tname = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
         if not tname:
             root = next((c for c in reversed(chain(key))
@@ -393,6 +395,8 @@ def main():
             hold.setdefault(who, []).append([key, summ, "HOLD", "", day(F(n, "created"))]); continue
         if st == "완료":
             done.setdefault(who, []).append([key, summ, "완료", day(F(n, "resolutiondate")), day(F(n, "created")), summ]); continue
+        if st == "예정" and (F(n, "status", "name") or "") != "SUGGESTED":
+            continue   # 오너 에픽도 '예정'은 SUGGESTED 상태만
         per.setdefault(who, {})[summ] = [[key, summ, st, None, F(n, "project", "key")]]
         tax["tasks"].setdefault(summ, {"domain": "기타 서비스", "badges": ["오너"], "initiative": None,
                                        "platform": "29CM" if F(n, "project", "key") in M29 else "무신사",
