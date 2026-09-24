@@ -143,6 +143,120 @@ def fetch_overrides():
         return {}
 
 
+HOLIDAY_ICAL = ("https://calendar.google.com/calendar/ical/"
+                "ko.south_korea%23holiday%40group.v.calendar.google.com/public/basic.ics")
+# 공휴일 아님(제외): description 이 '공휴일' 이어도 빼는 것 + description 없을 때 블록리스트
+HOL_BLOCK = {"제헌절", "국군의날", "크리스마스 이브", "섣달 그믐날", "정월대보름",
+             "한식", "초복", "중복", "말복", "석가탄신일 전야"}
+
+
+def _ical_fetch(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "design-roster-leave"})
+    return urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "replace")
+
+
+def _ical_events(txt):
+    """VEVENT 목록 → [{summary, desc, start(date), end(date)}]. all-day(VALUE=DATE)만."""
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    unfolded = []
+    for ln in txt.split("\n"):
+        if ln[:1] in (" ", "\t") and unfolded:
+            unfolded[-1] += ln[1:]
+        else:
+            unfolded.append(ln)
+    evs, cur = [], None
+    for ln in unfolded:
+        if ln == "BEGIN:VEVENT":
+            cur = {}
+        elif ln == "END:VEVENT":
+            if cur is not None:
+                evs.append(cur)
+            cur = None
+        elif cur is not None and ":" in ln:
+            k, v = ln.split(":", 1)
+            key = k.split(";")[0].upper()
+            if key == "SUMMARY":
+                cur["summary"] = v.strip()
+            elif key == "DESCRIPTION":
+                cur["desc"] = v.strip()
+            elif key == "DTSTART" and "DATE" in k.upper() and "T" not in v:
+                cur["start"] = v.strip()[:8]
+            elif key == "DTEND" and "DATE" in k.upper() and "T" not in v:
+                cur["end"] = v.strip()[:8]
+    return evs
+
+
+def _wkid(d):
+    iso = d.isocalendar()
+    return "%04d-W%02d" % (iso[0], iso[1])
+
+
+def _weekdays(s8, e8):
+    """YYYYMMDD start(포함)~end(제외) 사이 평일 date 목록."""
+    try:
+        s = datetime.date(int(s8[:4]), int(s8[4:6]), int(s8[6:8]))
+        e = datetime.date(int(e8[:4]), int(e8[4:6]), int(e8[6:8])) if e8 else s + datetime.timedelta(days=1)
+    except Exception:
+        return []
+    out, cur = [], s
+    while cur < e and (cur - s).days < 60:
+        if cur.weekday() < 5:
+            out.append(cur)
+        cur += datetime.timedelta(days=1)
+    return out
+
+
+def compute_leave(names):
+    """휴가·공휴일을 iCal에서 계산 → {asof, hol:{주:일수}, vac:{이름:{주:일수}}}.
+    PXD_LEAVE_ICAL(휴가 캘린더 비공개 iCal) 있으면 매 빌드 자동 갱신,
+    없으면 봉인된 leave.enc 로 폴백."""
+    vac_url = os.environ.get("PXD_LEAVE_ICAL", "").strip()
+    if not vac_url:
+        return load_sealed("leave") or {}
+    today = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).date()
+    lo = today - datetime.timedelta(weeks=2)
+    hi = today + datetime.timedelta(weeks=20)
+
+    def in_range(d):
+        return lo <= d <= hi
+
+    hol = {}
+    try:
+        for e in _ical_events(_ical_fetch(HOLIDAY_ICAL)):
+            summ = e.get("summary", "")
+            desc = e.get("desc", "")
+            is_hol = ("공휴일" in desc) if desc else (summ not in HOL_BLOCK)
+            if not is_hol or summ in HOL_BLOCK or summ == "제헌절":
+                continue
+            for d in _weekdays(e.get("start", ""), e.get("end", "")):
+                if in_range(d):
+                    hol[_wkid(d)] = hol.get(_wkid(d), 0) + 1
+    except Exception as ex:
+        print("공휴일 iCal 실패(폴백 시도):", ex)
+        hol = ((load_sealed("leave") or {}).get("hol")) or {}
+
+    vac = {}
+    try:
+        for e in _ical_events(_ical_fetch(vac_url)):
+            summ = e.get("summary", "")
+            if "]" not in summ:
+                continue
+            nm = summ.split("]", 1)[1].strip()
+            if nm not in names:
+                continue
+            frac = 0.25 if "반반차" in summ else (0.5 if "반차" in summ else 1.0)
+            for d in _weekdays(e.get("start", ""), e.get("end", "")):
+                if in_range(d):
+                    vac.setdefault(nm, {})
+                    vac[nm][_wkid(d)] = round(vac[nm].get(_wkid(d), 0) + frac, 2)
+    except Exception as ex:
+        print("휴가 iCal 실패:", ex)
+        return load_sealed("leave") or {}
+
+    print("휴가·공휴일 iCal 반영: 공휴일주 %d, 휴가인원 %d" % (len(hol), len(vac)))
+    return {"asof": today.strftime("%Y-%m-%d"), "hol": hol, "vac": vac}
+
+
 def load_sealed(name):
     """name.enc(암호화) 우선, 없으면 name.json(평문). 둘 다 없으면 None."""
     p = os.path.join(HERE, name + ".enc")
@@ -588,8 +702,9 @@ def main():
     # 비프로젝트(회의·Slack·보고·TT 준비 등) = 주 6h, 전역 단일값. 각 인원 부하에 더해 '점유'로 계산한다.
     basis["nonproject_hours"] = 6
     basis["nonproject_by_team"] = {}
-    # 휴가·공휴일(주별 가용 차감) — leave.enc(봉인)에서 주입. 캘린더는 CI에서 못 읽으므로 Cowork에서 봉인해 둔다.
-    basis["_leave"] = load_sealed("leave") or {}
+    # 휴가·공휴일(주별 가용 차감) — PXD_LEAVE_ICAL(휴가 캘린더 비공개 iCal) 있으면 매 빌드 자동 갱신,
+    # 없으면 봉인된 leave.enc 로 폴백. 공휴일은 공개 iCal 에서 항상 계산.
+    basis["_leave"] = compute_leave(set(people))
     # 팀별 속도 추세 히스토리는 basis 안에 함께 저장(별도 파일 불필요 → 워크플로 수정 불필요)
     if _HIST_SNAP:
         h = basis.setdefault("_hist", {"days": []})

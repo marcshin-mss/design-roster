@@ -43,6 +43,7 @@ jobs:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
           GATE_PASS:  ${{ secrets.GATE_PASS }}
+          PXD_LEAVE_ICAL: ${{ secrets.PXD_LEAVE_ICAL }}
         run: python build.py
       - name: 변경분 커밋
         run: |
