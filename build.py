@@ -588,6 +588,8 @@ def main():
     # 비프로젝트(회의·Slack·보고·TT 준비 등) = 주 6h, 전역 단일값. 각 인원 부하에 더해 '점유'로 계산한다.
     basis["nonproject_hours"] = 6
     basis["nonproject_by_team"] = {}
+    # 휴가·공휴일(주별 가용 차감) — leave.enc(봉인)에서 주입. 캘린더는 CI에서 못 읽으므로 Cowork에서 봉인해 둔다.
+    basis["_leave"] = load_sealed("leave") or {}
     # 팀별 속도 추세 히스토리는 basis 안에 함께 저장(별도 파일 불필요 → 워크플로 수정 불필요)
     if _HIST_SNAP:
         h = basis.setdefault("_hist", {"days": []})
@@ -702,8 +704,12 @@ def main():
                         lmem.setdefault(who, {"t": k, "lead": bool(m.get("lead")), "w": {}})
                         lmem[who]["t"] = k
                         lmem[who]["lead"] = bool(m.get("lead"))
-                        # 점유 = 프로젝트 부하 + 비프로젝트(회의 등) / 정원 = 주 근로시간(비프로젝트 포함)
-                        lmem[who]["w"][wk] = [round(w + _npOf(k) / 8.0, 2), round(week_h / 8.0, 2)]
+                        # 점유 = 프로젝트 부하 + 비프로젝트(회의 등) / 정원 = 주 근로시간 − (공휴일+휴가)일
+                        _lv = basis.get("_leave") or {}
+                        _hd = (_lv.get("hol") or {}).get(wk, 0)
+                        _vd = ((_lv.get("vac") or {}).get(who) or {}).get(wk, 0)
+                        _capd = max(0.25, week_h / 8.0 - _hd - _vd)
+                        lmem[who]["w"][wk] = [round(w + _npOf(k) / 8.0, 2), round(_capd, 2)]
                 lweeks[:] = lweeks[-26:]
                 keepw = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
                 for who in list(lmem.keys()):

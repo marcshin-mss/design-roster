@@ -1655,3 +1655,18 @@ branch 'main' set up to track 'origin/main'.
 완료: app
 이제 커밋하시면 됩니다. 평문은 리포에 남지 않습니다.
 ▸ 푸시
+──────────────────────────────────────────
+▶ 자동배포 시작 2026-09-24 11:14:00
+▸ 봉인
+  (키체인에 저장된 GATE_PASS 사용)
+  건너뜀 — taxonomy.json 없음
+  건너뜀 — basis.json 없음
+  건너뜀 — slack.json 없음
+  건너뜀 — one.json 없음
+  app.json → app.enc  (평문 삭제)
+  건너뜀 — runway.json 없음
+  leave.json → leave.enc  (평문 삭제)
+
+완료: app, leave
+이제 커밋하시면 됩니다. 평문은 리포에 남지 않습니다.
+▸ 푸시
