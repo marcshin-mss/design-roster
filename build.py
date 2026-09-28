@@ -871,6 +871,42 @@ def main():
                     x["b"].append("3Q순연")
     print(f"4Q 빅락 라벨 {_q4n}건")
 
+    # ── 7.6b 과제별 분기(qs) — 도메인·성격 탭의 분기 필터용 (Marc 2026-09-28) ──
+    #   qs = 생성 분기 ∪ 빌드 시점 현재 분기(지금 진행·예정 중이므로) ∪ runway 계획 분기.
+    #   → 현재 분기 탭 = 지금 도는 과제 전부, 다음 분기(예: 26 4Q, 27 1Q)는 runway 계획이 있으면 자동으로 생긴다.
+    def _nq(s):
+        mm = re.match(r"\s*(\d{4})-Q(\d)", s or "")
+        return ("%s %sQ" % (mm.group(1)[2:], mm.group(2))) if mm else None
+
+    _now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    _curq = "%02d %dQ" % (_now.year % 100, (_now.month - 1) // 3 + 1)
+
+    def _rw_rows(x):
+        cands = []
+        if x.get("init"):
+            cands.append(x["init"]); cands += chain(x["init"])
+        for r in (x.get("tk") or []):
+            cands.append(r[0]); cands += chain(r[0])
+        return [_rwk[c] for c in cands if c in _rwk]
+
+    def _qsort(q):
+        a, b = q.split()
+        return (int(a), int(b[0]))
+
+    for t in D["teams"]:
+        for m in t["members"]:
+            for x in m.get("tasks", []):
+                qs = {_curq}
+                if x.get("q"):
+                    qs.add(x["q"])
+                for row in _rw_rows(x):
+                    for part in str(row.get("q") or "").split(","):
+                        nq = _nq(part)
+                        if nq:
+                            qs.add(nq)
+                x["qs"] = sorted(qs, key=_qsort)
+    print(f"분기 필터 기준 현재 분기 {_curq}")
+
     # ── 7.7 스냅샷 히스토리 (팀별 속도 추세용 — 날짜별 1건 upsert) ──
     try:
         def _med(a):
