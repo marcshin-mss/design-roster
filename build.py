@@ -897,14 +897,16 @@ def main():
         for m in t["members"]:
             for x in m.get("tasks", []):
                 qs = {_curq}
+                rq = set()          # runway 계획 분기(성격 탭의 분기별 계획/인입 판정용)
                 if x.get("q"):
                     qs.add(x["q"])
                 for row in _rw_rows(x):
                     for part in str(row.get("q") or "").split(","):
                         nq = _nq(part)
                         if nq:
-                            qs.add(nq)
+                            qs.add(nq); rq.add(nq)
                 x["qs"] = sorted(qs, key=_qsort)
+                x["rq"] = sorted(rq, key=_qsort)
     print(f"분기 필터 기준 현재 분기 {_curq}")
 
     # ── 7.7 스냅샷 히스토리 (팀별 속도 추세용 — 날짜별 1건 upsert) ──
