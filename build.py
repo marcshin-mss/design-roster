@@ -422,6 +422,26 @@ def main():
                 return dom
         return "기타 서비스"
 
+    # ── 도메인 수기 오버라이드 (Marc 지정, 2026-09-28) ──
+    #   내용 기준으로 특정 과제를 지정 도메인에 강제 배치. taxonomy/guess 보다 우선.
+    #   부분일치(소문자) — 접두어([PD]·[공통]·[Admin] 등)가 붙어도 잡힌다.
+    DOMAIN_OVERRIDE_SUB = [
+        ("optimal user", "탐색·검색"),
+        ("옵티멀", "탐색·검색"),
+        ("카테고리 메뉴 블루닷", "탐색·검색"),
+        ("상품 리스트 정보 영역 개선", "탐색·검색"),
+        ("브랜드탭 상품더보기", "탐색·검색"),
+        ("ai 태깅 자동화 확대", "탐색·검색"),
+        ("구매챌린지", "무진장/이구위크"),
+    ]
+
+    def domain_override(name):
+        low = (name or "").lower()
+        for sub, dom in DOMAIN_OVERRIDE_SUB:
+            if sub in low:
+                return dom
+        return None
+
     # FT(FastTrack) 판정 — 디자인 발의(design-driven)에 국한하지 않는다.
     #   실무 티켓/조상이 FT 프로젝트이거나 fast-track 계열 라벨·요약 마커를 가지면 FT 성격으로 본다.
     FT_LABELS = {"fasttrack", "fast-track-away", "fast-track-home", "pel-fast-track",
@@ -527,6 +547,12 @@ def main():
             e["bucket"] = True
     # FT·디자인QA(단일) 는 도메인 축 themes 에서 뺀다 (성격 축에만 남긴다)
     tax["themes"] = [th for th in tax["themes"] if th["k"] not in ("FT", "디자인QA")]
+    # 무진장 도메인 표기 변경 → 무진장/이구위크 (이구위크 구매챌린지 온사이트 과제 포함, Marc 지정 2026-09-28)
+    for th in tax["themes"]:
+        if th.get("k") == "무진장":
+            th["k"] = "무진장/이구위크"
+    if not any(th.get("k") == "무진장/이구위크" for th in tax["themes"]):
+        tax["themes"].append({"k": "무진장/이구위크"})
 
     # ── 6. D 조립 ──────────────────────────────────────────────────
     def dedupe(rows):
@@ -576,7 +602,19 @@ def main():
                 is_bucket = d.get("bucket") or tname == BUCKET or tname.startswith(BUCKET + " · ")
                 if dom == "기타 서비스" and not is_bucket:
                     dom = guess_domain(tname, [r[1] for r in rows])
-                x = {"t": tname, "th": dom, "b": badges,
+                # 수기 오버라이드 (내용 기준 재배치) — taxonomy/guess 보다 우선
+                _ov = domain_override(tname)
+                if _ov:
+                    dom = _ov
+                # QA '기타 서비스' 버킷 → 유즈드 (버킷명도 유즈드로, Marc 지정)
+                disp = tname
+                if tname == BUCKET + " · 기타 서비스":
+                    dom = "유즈드"
+                    disp = BUCKET + " · 유즈드"
+                # 무진장 도메인 표기 통합 → 무진장/이구위크
+                if dom == "무진장":
+                    dom = "무진장/이구위크"
+                x = {"t": disp, "th": dom, "b": badges,
                      "init": d.get("initiative"), "pf": pf,
                      "tk": [[r[0], r[1], r[2], None] for r in rows],
                      "it": [r[1] for r in rows]}
