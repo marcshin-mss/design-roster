@@ -777,7 +777,10 @@ def main():
                 if d.get("own"):
                     x["own"] = 1
                 tasks.append(x)
-            tasks.sort(key=lambda z: (1 if z.get("bkt") else 0, -z["a"], -z["n"], z["t"]))
+            # 정렬: 버킷 맨 뒤 → FT 과제는 하단으로 → 진행중 많은 순 → 티켓 수 → 이름
+            tasks.sort(key=lambda z: (1 if z.get("bkt") else 0,
+                                      1 if "FT" in (z.get("b") or []) else 0,
+                                      -z["a"], -z["n"], z["t"]))
             tm["members"].append({
                 "name": who, "role": m.get("role", ""), "lead": bool(m.get("lead")),
                 "tasks": tasks, "n": sum(len(x["tk"]) for x in tasks),
