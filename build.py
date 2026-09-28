@@ -72,6 +72,32 @@ def day(v):
     return v[:10] if v else None
 
 
+def adf_text(node):
+    """Jira 설명(ADF JSON) → 평문. 티켓·에픽 내용을 사이징 근거로 쓰기 위해 추출."""
+    if node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(adf_text(x) for x in node)
+    if isinstance(node, dict):
+        t = node.get("type")
+        if t == "text":
+            return node.get("text", "")
+        if t == "hardBreak":
+            return "\n"
+        inner = adf_text(node.get("content"))
+        if t in ("paragraph", "heading", "listItem", "blockquote",
+                 "bulletList", "orderedList", "codeBlock", "tableRow"):
+            return inner + "\n"
+        return inner
+    return ""
+
+
+def _compact(s):
+    return re.sub(r"\s", "", s or "")
+
+
 def quarter_of(d):
     """'2026-09-01' → '26 3Q' (분기 = 생성일 기준). 날짜 없으면 ''."""
     if not d or len(d) < 7:
@@ -315,7 +341,7 @@ def main():
     name_of = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
 
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
-           "created", "resolutiondate", "labels", "project", "updated"]
+           "created", "resolutiondate", "labels", "project", "updated", "description"]
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -359,6 +385,29 @@ def main():
             c = parent.get(c)
             d -= 1
         return out
+
+    def desc_of(key):
+        n = meta.get(key)
+        return adf_text(F(n, "description")).strip() if n else ""
+
+    def evidence_of(rows):
+        """과제 사이징 근거 내용을 찾는다. 실무 티켓 본문이 비어 있으면
+        상위 에픽·이니셔티브를 타고 올라가 내용 있는 조상을 쓴다.
+        반환: (본문텍스트, 근거키, 근거유형)."""
+        own = "\n".join(desc_of(r[0]) for r in rows).strip()
+        if len(_compact(own)) >= 30:
+            k0 = rows[0][0] if rows else None
+            ty0 = F(meta.get(k0) or {}, "issuetype", "name") or "티켓"
+            return own, k0, ty0
+        for r in rows:
+            for a in chain(r[0]):
+                n = meta.get(a)
+                if not n:
+                    continue
+                dtx = desc_of(a)
+                if len(_compact(dtx)) >= 30:
+                    return dtx, a, (F(n, "issuetype", "name") or "상위")
+        return own, (rows[0][0] if rows else None), "티켓"
 
     def is_cbp(key):
         for a in [key] + chain(key):
@@ -614,10 +663,14 @@ def main():
                 # 무진장 도메인 표기 통합 → 무진장/이구위크
                 if dom == "무진장":
                     dom = "무진장/이구위크"
+                # 사이징 근거 내용 — 실무 티켓 본문이 비면 상위 에픽·이니셔티브에서 끌어온다
+                ev_tx, ev_k, ev_ty = evidence_of(rows)
                 x = {"t": disp, "th": dom, "b": badges,
                      "init": d.get("initiative"), "pf": pf,
                      "tk": [[r[0], r[1], r[2], None] for r in rows],
                      "it": [r[1] for r in rows]}
+                if ev_k and _compact(ev_tx):
+                    x["ev"] = {"k": ev_k, "ty": ev_ty, "tx": ev_tx[:1200]}
                 x["n"] = len(x["tk"])
                 x["a"] = sum(1 for r in x["tk"] if r[2] == "진행 중")
                 _crs = [day(F(meta.get(r[0]) or {}, "created")) for r in rows]
@@ -737,6 +790,22 @@ def main():
     basis.setdefault("tasks", {})
     for tname in tax["tasks"]:
         basis["tasks"].setdefault(tname, {"size": "M", "hours": 9, "provisional": True})
+    # ── 사이즈 수기 판단 (에픽·이니셔티브 내용 기반, Marc 요청 2026-09-28) ──
+    #   빈 티켓이라 '조정 권장(M)'으로 뜨던 과제를, 상위 에픽/이니셔티브 내용을 읽고
+    #   디자인 작업량 기준으로 확정한 값. 여기 값은 팀장 직접조정(워커 공유)보다는 낮은 우선순위
+    #   (대시보드 szOf 는 워커 오버라이드 u.s 가 있으면 그걸 우선). basis 기본값을 확정으로 바꿔 '조정 권장' 해제.
+    _band_h = (basis.get("size_bands") or {"XS": 2, "S": 5, "M": 10, "L": 18, "XL": 30})
+    SIZE_JUDGED = {
+        "[PD][PDP] 이미지별 모델/착용정보 노출": "S",
+    }
+    _judged = {k.strip(): v for k, v in SIZE_JUDGED.items()}
+    for tname, ent in basis["tasks"].items():
+        band = _judged.get((tname or "").strip())
+        if band:
+            ent["size"] = band
+            ent["hours"] = _band_h.get(band, ent.get("hours", 9))
+            ent["provisional"] = False
+            ent["judged"] = "epic"   # 근거: 상위 에픽/이니셔티브 내용
     # 비프로젝트(회의·Slack·보고·TT 준비 등) = 주 6h, 전역 단일값. 각 인원 부하에 더해 '점유'로 계산한다.
     basis["nonproject_hours"] = 6
     basis["nonproject_by_team"] = {}
