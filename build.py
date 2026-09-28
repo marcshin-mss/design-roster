@@ -841,6 +841,36 @@ def main():
     D["rwq"] = {"asof": _rw.get("asof", ""), "rows": _rwr}
     print(f"runway 예정 디자인 수요 {len(_rwr)}건")
 
+    # ── 7.6 4Q 빅락 / 3Q 순연 라벨 (일반 과제, Marc 2026-09-28) ──
+    #   과제의 이니셔티브(또는 조상 체인)가 runway 2026-Q4 Big-Rock 이면 '4Q빅락',
+    #   아니면 '3Q순연'(3Q부터 이어온 일반 과제). 버킷(디자인QA)·오너 에픽은 제외.
+    _rwk = {row.get("k"): row for row in (_rw.get("rows") or []) if row.get("k")}
+
+    def _is_q4_bigrock(x):
+        cands = []
+        if x.get("init"):
+            cands.append(x["init"]); cands += chain(x["init"])
+        for r in (x.get("tk") or []):
+            cands.append(r[0]); cands += chain(r[0])
+        for c in cands:
+            row = _rwk.get(c)
+            if row and "2026-Q4" in str(row.get("q") or "") and row.get("pri") == "Big-Rock":
+                return True
+        return False
+
+    _q4n = 0
+    for t in D["teams"]:
+        for m in t["members"]:
+            for x in m.get("tasks", []):
+                if x.get("bkt") or x.get("own"):
+                    continue
+                x["b"] = [b for b in x["b"] if b not in ("4Q빅락", "3Q순연")]
+                if _is_q4_bigrock(x):
+                    x["b"].append("4Q빅락"); _q4n += 1
+                else:
+                    x["b"].append("3Q순연")
+    print(f"4Q 빅락 라벨 {_q4n}건")
+
     # ── 7.7 스냅샷 히스토리 (팀별 속도 추세용 — 날짜별 1건 upsert) ──
     try:
         def _med(a):
