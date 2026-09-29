@@ -325,6 +325,10 @@ def main():
     if not tax:
         sys.exit("taxonomy.enc 도 taxonomy.json 도 없습니다.")
     teams = tax["teams"]
+    # 퇴사·이동 인원 — taxonomy(봉인) 를 다시 풀지 않고 빌드 시점에 로스터에서 뺀다 (Marc 2026-09-29)
+    LEFT = {"김정탁"}
+    for _t in teams:
+        _t["members"] = [m for m in _t["members"] if m.get("name") not in LEFT]
     people = {m["name"]: (t, m) for t in teams for m in t["members"]}
     basisNow = load_sealed("basis") or {"tasks": {}}   # 완료 건 사이즈 태깅·히스토리용 조기 로드
     def _dnrow(d2):
