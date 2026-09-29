@@ -341,7 +341,7 @@ def main():
     name_of = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
 
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
-           "created", "resolutiondate", "labels", "project", "updated", "description"]
+           "created", "resolutiondate", "labels", "project", "updated", "description", "priority"]
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -841,35 +841,84 @@ def main():
     D["rwq"] = {"asof": _rw.get("asof", ""), "rows": _rwr}
     print(f"runway 예정 디자인 수요 {len(_rwr)}건")
 
-    # ── 7.6 4Q 빅락 / 3Q 순연 라벨 (일반 과제, Marc 2026-09-28) ──
-    #   과제의 이니셔티브(또는 조상 체인)가 runway 2026-Q4 Big-Rock 이면 '4Q빅락',
-    #   아니면 '3Q순연'(3Q부터 이어온 일반 과제). 버킷(디자인QA)·오너 에픽은 제외.
+    # ── 7.6 분기 라벨(4Q / 3Q순연) + 과제 규모(우선순위) (Marc 2026-09-29) ──
+    #   규모 = 상위 이니셔티브의 Jira 우선순위 필드(Big-Rock·P0·P1·P2·Emergency, 라이브).
+    #          Jira 에 값이 없을 때만 runway 스냅샷의 pri 로 보완. 철회/반려/취소된 이니셔티브는 건너뛴다.
+    #   분기 = 4Q 에 새로 생긴 과제, 또는 runway 계획이 4Q 에만 잡힌 과제 → '4Q'
+    #          3Q(이전)에 생겨 runway 3Q 계획에 걸려 있거나 계획 없이 이어오는 과제 → '3Q순연'
+    #   버킷(디자인QA)·오너 에픽은 제외.
     _rwk = {row.get("k"): row for row in (_rw.get("rows") or []) if row.get("k")}
+    PRI_OK = ("Big-Rock", "P0", "P1", "P2", "Emergency")
+    _need = sorted({x.get("init") for t in D["teams"] for m in t["members"] for x in m.get("tasks", [])
+                    if x.get("init") and x.get("init") not in meta})
+    for i in range(0, len(_need), 45):
+        try:
+            for n in jql("key in (%s)" % ",".join(_need[i:i + 45]), FLD):
+                meta[n["key"]] = n
+        except Exception as e:
+            print("이니셔티브 우선순위 조회 실패(무시):", e)
 
-    def _is_q4_bigrock(x):
+    def _cands(x):
         cands = []
         if x.get("init"):
             cands.append(x["init"]); cands += chain(x["init"])
         for r in (x.get("tk") or []):
             cands.append(r[0]); cands += chain(r[0])
+        seen, out = set(), []
         for c in cands:
-            row = _rwk.get(c)
-            if row and "2026-Q4" in str(row.get("q") or "") and row.get("pri") == "Big-Rock":
-                return True
-        return False
+            if c not in seen:
+                seen.add(c); out.append(c)
+        return out
 
-    _q4n = 0
+    def _dead(n):
+        st = str(F(n, "status", "name") or "")
+        return any(w in st for w in ("철회", "반려", "취소"))
+
+    def _is_init(n):
+        ty = str(F(n, "issuetype", "name") or "")
+        return "Initiative" in ty or "이니셔티브" in ty
+
+    def _pri_of(x):
+        live = [meta[c] for c in _cands(x) if c in meta and not _dead(meta[c])]
+        for pick in (lambda n: _is_init(n), lambda n: True):
+            for n in live:
+                v = F(n, "priority", "name")
+                if pick(n) and v in PRI_OK:
+                    return v, n["key"], "jira"
+        for c in _cands(x):
+            row = _rwk.get(c)
+            if row and row.get("pri") in PRI_OK:
+                return row["pri"], c, "runway"
+        return None, None, None
+
+    def _q_label(x):
+        rq = set()
+        for c in _cands(x):
+            row = _rwk.get(c)
+            if row:
+                rq |= {p.strip() for p in str(row.get("q") or "").split(",") if p.strip()}
+        cq = x.get("q") or ""                       # 생성 분기 "26 3Q"
+        if cq and cq >= "26 4Q":
+            return "4Q"
+        if "2026-Q4" in rq and not any(q < "2026-Q4" for q in rq):
+            return "4Q"
+        return "3Q순연"
+
+    _cnt = {}
     for t in D["teams"]:
         for m in t["members"]:
             for x in m.get("tasks", []):
+                x["b"] = [b for b in x["b"] if b not in ("4Q빅락", "3Q순연", "4Q")]
+                x.pop("pri", None)
                 if x.get("bkt") or x.get("own"):
                     continue
-                x["b"] = [b for b in x["b"] if b not in ("4Q빅락", "3Q순연")]
-                if _is_q4_bigrock(x):
-                    x["b"].append("4Q빅락"); _q4n += 1
-                else:
-                    x["b"].append("3Q순연")
-    print(f"4Q 빅락 라벨 {_q4n}건")
+                ql = _q_label(x)
+                x["b"].append(ql)
+                pv, pk, src = _pri_of(x)
+                if pv:
+                    x["pri"] = [pv, pk, src]
+                _cnt[(ql, pv)] = _cnt.get((ql, pv), 0) + 1
+    print("분기·규모 라벨", {"%s/%s" % k: v for k, v in sorted(_cnt.items(), key=str)})
 
     # ── 7.6b 과제별 분기(qs) — 도메인·성격 탭의 분기 필터용 (Marc 2026-09-28) ──
     #   qs = 생성 분기 ∪ 빌드 시점 현재 분기(지금 진행·예정 중이므로) ∪ runway 계획 분기.
