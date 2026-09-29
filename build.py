@@ -1163,7 +1163,9 @@ def main():
                         _hd = (_lv.get("hol") or {}).get(wk, 0)
                         _vd = ((_lv.get("vac") or {}).get(who) or {}).get(wk, 0)
                         _capd = max(0.25, week_h / 8.0 - _hd - _vd)
-                        lmem[who]["w"][wk] = [round(w + _npOf(k) / 8.0, 2), round(_capd, 2)]
+                        # 휴가 주는 과제·회의도 출근일만큼만 진행 → 점유도 출근 비율로 줄인다 (앱 occOf 와 동일)
+                        _pres = min(1.0, _capd / max(0.25, week_h / 8.0))
+                        lmem[who]["w"][wk] = [round((w + _npOf(k) / 8.0) * _pres, 2), round(_capd, 2)]
                 lweeks[:] = lweeks[-26:]
                 keepw = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
                 for who in list(lmem.keys()):
