@@ -329,6 +329,36 @@ def main():
     LEFT = {"김정탁"}
     for _t in teams:
         _t["members"] = [m for m in _t["members"] if m.get("name") not in LEFT]
+    # 신규 입사자 자동 편입 (Marc 2026-09-30) — 로스터(taxonomy)에 없는 사람이 PXD 디자인 티켓이 도는 프로젝트에서
+    #   디자인 티켓을 받으면, Jira 표시명의 소속(예: 'Biz-P Commerce Design')으로 조직을 찾아 멤버로 넣는다.
+    #   → 로스터·리소스·조직도(HC 자리)에 자동 반영. 다른 조직(Core-P 등)·29CM Customer Engagement 는 소속이 달라 제외.
+    try:
+        _known = {m.get("account") for t in teams for m in t["members"] if m.get("account")}
+        _IN0 = "(" + ",".join('"%s"' % a for a in _known) + ")"
+        _pj = sorted({F(n, "project", "key") for n in jql(f'assignee in {_IN0} AND created >= -90d', ["project"], cap=1500)
+                      if F(n, "project", "key")})
+        _added = {}
+        if _pj:
+            _cand = jql(f'project in ({",".join(_pj)}) AND issuetype in ({TYPES}) AND created >= -60d '
+                        f'AND assignee is not EMPTY AND assignee not in {_IN0}', ["assignee"], cap=1500)
+            for n in _cand:
+                a = F(n, "assignee") or {}
+                acc, disp = a.get("accountId"), a.get("displayName") or ""
+                if not acc or acc in _known or acc in _added:
+                    continue
+                org = org_of(disp)
+                if not org or "Customer" in org:
+                    continue
+                tm = next((t for t in teams if org == t["name"] or org.endswith(" " + t["name"])), None)
+                nm = disp.split("/")[0].strip()
+                if tm is None or not nm or nm in LEFT:
+                    continue
+                _added[acc] = (tm, nm)
+        for acc, (tm, nm) in _added.items():
+            tm["members"].append({"name": nm, "account": acc, "role": "", "lead": False, "auto": True})
+            print(f"신규 입사자 자동 편입: {nm} → {tm['name']}")
+    except Exception as _e:
+        print("신규 입사자 탐지 건너뜀:", _e)
     people = {m["name"]: (t, m) for t in teams for m in t["members"]}
     basisNow = load_sealed("basis") or {"tasks": {}}   # 완료 건 사이즈 태깅·히스토리용 조기 로드
     def _dnrow(d2):
@@ -785,7 +815,7 @@ def main():
             tasks.sort(key=lambda z: (1 if z.get("bkt") else (2 if "FT" in (z.get("b") or []) else 0),
                                       -z["a"], -z["n"], z["t"]))
             tm["members"].append({
-                "name": who, "role": m.get("role", ""), "lead": bool(m.get("lead")),
+                "name": who, "role": m.get("role", ""), "lead": bool(m.get("lead")), "auto": bool(m.get("auto")),
                 "tasks": tasks, "n": sum(len(x["tk"]) for x in tasks),
                 "hd": hold.get(who, []), "dn": [_dnrow(d2) for d2 in done.get(who, [])],
                 "wk": 0, "over": 0, "md": 0})
