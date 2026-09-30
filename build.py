@@ -332,6 +332,7 @@ def main():
     # 신규 입사자 자동 편입 (Marc 2026-09-30) — 로스터(taxonomy)에 없는 사람이 PXD 디자인 티켓이 도는 프로젝트에서
     #   디자인 티켓을 받으면, Jira 표시명의 소속(예: 'Biz-P Commerce Design')으로 조직을 찾아 멤버로 넣는다.
     #   → 로스터·리소스·조직도(HC 자리)에 자동 반영. 다른 조직(Core-P 등)·29CM Customer Engagement 는 소속이 달라 제외.
+    _join_first = {}      # 신규 입사자 첫 티켓 생성일 (인원 변동 기록용)
     try:
         _known = {m.get("account") for t in teams for m in t["members"] if m.get("account")}
         _IN0 = "(" + ",".join('"%s"' % a for a in _known) + ")"
@@ -340,10 +341,13 @@ def main():
         _added = {}
         if _pj:
             _cand = jql(f'project in ({",".join(_pj)}) AND issuetype in ({TYPES}) AND created >= -60d '
-                        f'AND assignee is not EMPTY AND assignee not in {_IN0}', ["assignee"], cap=1500)
+                        f'AND assignee is not EMPTY AND assignee not in {_IN0}', ["assignee", "created"], cap=1500)
             for n in _cand:
                 a = F(n, "assignee") or {}
                 acc, disp = a.get("accountId"), a.get("displayName") or ""
+                _cr = (F(n, "created") or "")[:10]
+                if acc and _cr and (acc not in _join_first or _cr < _join_first[acc]):
+                    _join_first[acc] = _cr
                 if not acc or acc in _known or acc in _added:
                     continue
                 org = org_of(disp)
@@ -1074,6 +1078,49 @@ def main():
     # 휴가·공휴일(주별 가용 차감) — PXD_LEAVE_ICAL(휴가 캘린더 비공개 iCal) 있으면 매 빌드 자동 갱신,
     # 없으면 봉인된 leave.enc 로 폴백. 공휴일은 공개 iCal 에서 항상 계산.
     basis["_leave"] = compute_leave(set(people))
+
+    # ── 인원 변동 자동 감지 (Marc 2026-09-30) → basis._rev {id: event} ──
+    #   입사 추정: 로스터에 자동 편입된 신규 입사자(첫 디자인 티켓 생성일)
+    #   퇴사 추정: 멤버의 Jira 계정이 비활성(active=false)
+    #   전배 추정: 멤버의 Jira 표시명 소속이 지난 빌드와 달라짐(basis._orgsnap 과 비교)
+    #   날짜는 처음 감지한 날(입사는 첫 티켓일). 화면에서 확정·수정·메모한다.
+    try:
+        rev = basis.setdefault("_rev", {})
+        snap = basis.setdefault("_orgsnap", {})
+        today_s = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d")
+        seen = {}
+        for n in issues + epics:
+            a = F(n, "assignee") or {}
+            if a.get("accountId"):
+                seen[a["accountId"]] = a
+        tname_of = {m.get("account"): (t["name"], m) for t in teams for m in t["members"] if m.get("account")}
+        for acc, (tnm, m) in tname_of.items():
+            nm = m["name"]
+            if m.get("auto"):
+                k = "auto-join-" + acc
+                if k not in rev:
+                    rev[k] = {"d": _join_first.get(acc, today_s), "t": "입사", "who": nm, "to": tnm,
+                              "note": "로스터에 없던 사람이 디자인 티켓을 받아 자동 감지(첫 티켓일 기준)", "src": "auto"}
+            a = seen.get(acc)
+            if not a:
+                continue
+            if a.get("active") is False:
+                k = "auto-left-" + acc
+                if k not in rev:
+                    rev[k] = {"d": today_s, "t": "퇴사", "who": nm, "from": tnm,
+                              "note": "Jira 계정 비활성 감지(감지일 기준)", "src": "auto"}
+            org = org_of(a.get("displayName") or "")
+            if org:
+                prev = snap.get(acc)
+                if prev and prev != org:
+                    k = "auto-move-%s-%s" % (acc, org)
+                    if k not in rev:
+                        rev[k] = {"d": today_s, "t": "전배", "who": nm, "from": prev, "to": org,
+                                  "note": "Jira 소속 변경 감지(감지일 기준)", "src": "auto"}
+                snap[acc] = org
+        print("인원 변동 자동 기록 %d건" % len(rev))
+    except Exception as _e:
+        print("인원 변동 감지 건너뜀:", _e)
     # 팀별 속도 추세 히스토리는 basis 안에 함께 저장(별도 파일 불필요 → 워크플로 수정 불필요)
     if _HIST_SNAP:
         h = basis.setdefault("_hist", {"days": []})
