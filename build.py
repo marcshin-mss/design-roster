@@ -383,7 +383,13 @@ def main():
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
-    issues = jql(f'issuetype in ({TYPES}) AND assignee in {IN} '
+    # UXR 은 PD 프로젝트에서 '에픽 → 부작업' 으로 일한다(Design/Task 티켓이 없음) → 리서처 계정만 에픽·부작업도 포함 (Marc 2026-10-01)
+    UXR_ACC = [m["account"] for t in teams for m in t["members"]
+               if m.get("account") and (t.get("key") == "uxr" or m.get("role") == "UXR")]
+    UXR_NAMES = {name_of.get(a) for a in UXR_ACC}
+    _uxr = (f' OR (project = PD AND issuetype in ("Epic","부작업") AND assignee in ('
+            + ",".join('"%s"' % a for a in UXR_ACC) + '))') if UXR_ACC else ""
+    issues = jql(f'(issuetype in ({TYPES}) AND assignee in {IN}{_uxr}) '
                  f'AND (created >= "{CUT}" OR (created >= "{LEAD}" AND statusCategory = "In Progress" AND status != "HOLD")) '
                  f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
     print(f"티켓 {len(issues)}건")
@@ -668,6 +674,17 @@ def main():
         if st == "예정" and (F(n, "status", "name") or "") != "SUGGESTED":
             continue   # 팀별 과제의 '예정'은 SUGGESTED 상태만 (Backlog·할일 등 제외)
         tname = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
+        if not tname and who in UXR_NAMES:
+            # 리서처: 가장 가까운 에픽(리서치 프로젝트) 하나를 과제로 묶는다 — 상위 KTLO 이니셔티브로 뭉치지 않게
+            ep = key if F(n, "issuetype", "name") == "Epic" else next(
+                (c for c in chain(key) if F(meta.get(c, {}), "issuetype", "name") == "Epic"), None)
+            if ep:
+                tname = clean_name(F(meta.get(ep) or n, "summary") or summ)
+                if tname not in tax["tasks"]:
+                    tax["tasks"][tname] = {"domain": "리서치·VOC", "badges": [], "initiative": ep,
+                                           "platform": "무신사", "bucket": False, "anchors": []}
+                    fresh.append(tname)
+                anchor[ep] = tname
         if not tname:
             root = next((c for c in reversed(chain(key))
                          if F(meta.get(c, {}), "issuetype", "name") in ("Initiative", "Epic")), None)
