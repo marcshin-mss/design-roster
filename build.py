@@ -246,7 +246,7 @@ def compute_leave(names):
     def in_range(d):
         return lo <= d <= hi
 
-    hol = {}
+    hol, hold = {}, set()
     try:
         for e in _ical_events(_ical_fetch(HOLIDAY_ICAL)):
             summ = e.get("summary", "")
@@ -257,6 +257,7 @@ def compute_leave(names):
             for d in _weekdays(e.get("start", ""), e.get("end", "")):
                 if in_range(d):
                     hol[_wkid(d)] = hol.get(_wkid(d), 0) + 1
+                    hold.add(d.isoformat())
     except Exception as ex:
         print("공휴일 iCal 실패(폴백 시도):", ex)
         hol = ((load_sealed("leave") or {}).get("hol")) or {}
@@ -280,7 +281,7 @@ def compute_leave(names):
         return load_sealed("leave") or {}
 
     print("휴가·공휴일 iCal 반영: 공휴일주 %d, 휴가인원 %d" % (len(hol), len(vac)))
-    return {"asof": today.strftime("%Y-%m-%d"), "hol": hol, "vac": vac}
+    return {"asof": today.strftime("%Y-%m-%d"), "hol": hol, "hold": sorted(hold), "vac": vac}
 
 
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN", "")
@@ -1307,6 +1308,15 @@ def main():
         h["days"] = h["days"][-120:]
         print("history 스냅샷: %s (%d일치, basis 내장)" % (_HIST_SNAP["date"], len(h["days"])))
 
+    # ── 주간 기록 기준일 (Marc 2026-10-02): 금요일 기준, 금요일이 휴일이면 그 전 영업일 기준.
+    #    → 영업일(평일·공휴일 아님)에 돈 빌드만 이번 주 값을 덮어쓴다. 주말·공휴일 빌드는 건드리지 않는다.
+    #    그 주에 아직 기록이 하나도 없을 때만(한 주 전체가 휴일 등) 예외로 남긴다.
+    _now_k = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    _hold = set((basis.get("_leave") or {}).get("hold") or [])
+    _BIZ = _now_k.weekday() < 5 and _now_k.date().isoformat() not in _hold
+    if not _BIZ:
+        print("주간 기록: 오늘(%s)은 주말·공휴일 — 이번 주 기록은 직전 영업일 값 유지" % _now_k.date())
+
     # ── 8.5 주간 사이즈 스냅샷 (매주 금 20시 KST — 담당자 조정값의 '최종'을 1건 기록) ──
     #   SNAP_WEEK=1 (워크플로가 금 20시 KST 실행에만 세팅) 일 때만 남긴다.
     #   실효 사이즈 = 워커 공유 오버라이드(sz) 우선, 없으면 basis.tasks 기본값.
@@ -1321,7 +1331,7 @@ def main():
             weeks = sh.setdefault("weeks", [])
             wkmap = sh.setdefault("wk", {})
             done_w = {(w.get("w") if isinstance(w, dict) else w) for w in weeks}
-            if True:
+            if _BIZ or wk not in done_w:
                 SEP = "\u0001"
                 ovr = fetch_overrides()
                 eff = {}
@@ -1361,7 +1371,7 @@ def main():
             lweeks = lh.setdefault("weeks", [])
             lmem = lh.setdefault("mem", {})
             done_w = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
-            if True:
+            if _BIZ or wk not in done_w:
                 SEP = "\u0001"
                 ovr = fetch_overrides()
                 bands = basis.get("size_bands") or {"XS": 2, "S": 5, "M": 10, "L": 18, "XL": 30}
