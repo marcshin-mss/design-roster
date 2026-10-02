@@ -283,6 +283,136 @@ def compute_leave(names):
     return {"asof": today.strftime("%Y-%m-%d"), "hol": hol, "vac": vac}
 
 
+SLACK_TOKEN = os.environ.get("SLACK_TOKEN", "")
+SL_CH    = "C09AAQF25QT"           # #one-제품디자인실 (비공개)
+SL_CHAIR = "U02AN7XEDE3"           # 의장(조만호) 'one' 계정
+SL_HEAD  = {"신행철"}               # 로스터 밖이지만 보고자로 인정
+SL_OK_W  = ("좋", "승인", "진행", "오케", "ok", "굿", "고고", "go", "확인했", "됐", "합시다", "하시죠", "👍")
+SL_NO_W  = ("보류", "다시", "재검토", "별로", "아닌", "아니", "고민", "수정", "바꿔", "빼", "왜", "?")
+SL_OK_R  = {"+1", "thumbsup", "ok", "ok_hand", "white_check_mark", "heavy_check_mark", "100", "clap", "승인", "good"}
+
+
+def _slack(method, **params):
+    """슬랙 Web API GET 한 번(429 면 Retry-After 만큼 쉬고 재시도)."""
+    import time as _t
+    url = "https://slack.com/api/" + method + "?" + urllib.parse.urlencode(params)
+    for attempt in range(5):
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + SLACK_TOKEN})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                d = json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                _t.sleep(int(e.headers.get("Retry-After", "5")) + 1)
+                continue
+            raise
+        if not d.get("ok"):
+            if d.get("error") == "ratelimited":
+                _t.sleep(5)
+                continue
+            raise RuntimeError(f"slack {method}: {d.get('error')}")
+        return d
+    raise RuntimeError(f"slack {method}: 재시도 초과")
+
+
+def slack_reports(people, ft_rows):
+    """#one-제품디자인실 에서 디자인 리더가 의장을 멘션해 올린 컨펌 요청과 의장 반응을 읽는다.
+    행 = [date, who, kind, out, ap, title, jirakeys, confidence, jirasummaries]
+    토큰이 없거나 실패하면 None(→ 봉인 스냅샷 사용). 읽기 전용."""
+    if not SLACK_TOKEN:
+        print("  SLACK_TOKEN 없음 — 슬랙 보고는 스냅샷 사용")
+        return None
+    import difflib
+    try:
+        oldest = datetime.datetime.strptime(CUT, "%Y-%m-%d").replace(
+            tzinfo=datetime.timezone(datetime.timedelta(hours=9))).timestamp()
+        msgs, cur = [], None
+        while True:
+            kw = {"channel": SL_CH, "oldest": "%.6f" % oldest, "limit": 200}
+            if cur:
+                kw["cursor"] = cur
+            d = _slack("conversations.history", **kw)
+            msgs += d.get("messages", [])
+            cur = (d.get("response_metadata") or {}).get("next_cursor")
+            if not cur:
+                break
+        names = {}
+
+        def name_of(uid):
+            if uid not in names:
+                try:
+                    u = _slack("users.info", user=uid).get("user") or {}
+                    pr = u.get("profile") or {}
+                    raw = pr.get("display_name") or pr.get("real_name") or u.get("real_name") or ""
+                    names[uid] = re.split(r"[/(\s]", raw.strip())[0] if raw.strip() else ""
+                except Exception:
+                    names[uid] = ""
+            return names[uid]
+
+        ftsum = {r[0]: r[7] for r in (ft_rows or [])}
+        snap = {(r[0], r[5]): r for r in (load_sealed("slack") or []) if len(r) >= 9}
+        KST = datetime.timezone(datetime.timedelta(hours=9))
+        rows = []
+        for m in msgs:
+            if m.get("subtype") or m.get("user") == SL_CHAIR:
+                continue
+            if m.get("thread_ts") and m.get("thread_ts") != m.get("ts"):
+                continue
+            txt = m.get("text") or ""
+            if "<@" + SL_CHAIR not in txt:
+                continue
+            who = name_of(m.get("user") or "")
+            if who not in people and who not in SL_HEAD:
+                continue
+            dt = datetime.datetime.fromtimestamp(float(m["ts"]), KST).strftime("%Y-%m-%d")
+            mb = re.search(r"\*([^*\n]{2,120})\*", txt)
+            title = (mb.group(1) if mb else re.sub(r"<[^>]+>", "", txt).strip().split("\n")[0])[:80].strip()
+            # 의장 반응: 스레드 댓글 → 리액션 순으로 본다
+            said = []
+            if m.get("reply_count"):
+                rp = _slack("conversations.replies", channel=SL_CH, ts=m["ts"], limit=200).get("messages", [])
+                said = [r.get("text") or "" for r in rp[1:] if r.get("user") == SL_CHAIR]
+                txt += "\n" + "\n".join(r.get("text") or "" for r in rp[1:])
+            reacted = any(SL_CHAIR in (rx.get("users") or []) and rx.get("name", "").split("::")[0] in SL_OK_R
+                          for rx in (m.get("reactions") or []))
+            if said:
+                last = said[-1].lower()
+                ok = any(w in last for w in SL_OK_W)
+                no = any(w in last for w in SL_NO_W)
+                out = "승인" if ok and not no else "보류"
+            elif reacted:
+                out = "승인"
+            else:
+                out = "무응답"
+            keys = sorted(set(re.findall(r"\b((?:FT|PD)-\d+)\b", txt)), key=lambda k: (k[:2], int(k.split("-")[1])))
+            cf = "high" if keys else "-"
+            if not keys and title:
+                def _sim(a, b):
+                    b = re.sub(r"\[[^\]]*\]\s*", "", b).strip()
+                    if not b:
+                        return 0
+                    if a in b or b in a:
+                        return 0.9
+                    return difflib.SequenceMatcher(None, a, b).ratio()
+                best = sorted(((_sim(title, sm), k) for k, sm in ftsum.items() if sm), reverse=True)[:1]
+                if best and best[0][0] >= 0.6:
+                    keys, cf = [best[0][1]], "medium"
+            old = snap.get((dt, title))
+            if old and not keys and old[6]:          # 사람이 판독해 둔 매칭이 있으면 유지
+                keys, cf = list(old[6]), old[7]
+            js = " | ".join(ftsum.get(k, "") for k in keys if ftsum.get(k))
+            if not js and old and keys == list(old[6] or []):
+                js = old[8]
+            rows.append([dt, who, "컨펌요청", out, "조만호" if out != "무응답" else "", title, keys, cf, js])
+        rows.sort(key=lambda r: (r[0], r[5]))
+        print(f"슬랙 의장 보고 {len(rows)}건 (승인 {sum(r[3] == '승인' for r in rows)} · "
+              f"보류 {sum(r[3] == '보류' for r in rows)} · 무응답 {sum(r[3] == '무응답' for r in rows)})")
+        return rows if rows else None
+    except Exception as e:
+        print(f"  슬랙 조회 실패({e}) — 스냅샷 사용")
+        return None
+
+
 def load_sealed(name):
     """name.enc(암호화) 우선, 없으면 name.json(평문). 둘 다 없으면 None."""
     p = os.path.join(HERE, name + ".enc")
@@ -859,10 +989,71 @@ def main():
     D["ft"] = ft
     print(f"FT {len(ft)}건")
 
-    # 슬랙(의장 보고)·ONE 보드는 사람이 판독한 내용이라 리포 파일에서 그대로 가져온다
-    D["sl"]  = load_sealed("slack") or []
-    D["one"] = load_sealed("one") or []
+    # ── 7.1 ONE 보드 (design-driven) — 지라에서 자동 갱신 (Marc 2026-10-02) ──
+    #   FT 이니셔티브(7/1 이후 생성) 중
+    #     · 담당자가 디자인 조직(org 가 'Design' 으로 끝남)이거나
+    #     · design-driven 라벨 + 보고자가 디자인 조직이거나
+    #     · one밀도감_* 라벨이 붙은 건
+    #   + PD 프로젝트의 one밀도감_* 라벨 에픽·디자인 티켓.
+    #   실패하면 리포의 봉인 스냅샷(one.enc)으로 대체한다.
+    def _is_des(n, f):
+        return org_of(F(n, f, "displayName") or "").endswith("Design")
+
+    def _one_bucket(n):
+        st = str(F(n, "status", "name") or "")
+        cat = str(F(n, "status", "statusCategory", "key") or "")
+        ty = str(F(n, "issuetype", "name") or "")
+        if st in DROP_ST or any(w in st for w in ("철회", "반려", "취소", "Drop")):
+            return "중단"
+        if st in ("Backlog", "SUGGESTED", "할일", "To Do"):
+            return "백로그"
+        if st.replace(" ", "") == "디자인완료":
+            return "디자인 완료"
+        if any(w in st for w in ("개발", "론치", "배포", "QA", "Launch", "Release")):
+            return "개발·론치"
+        if cat == "done":
+            return "디자인 완료" if ty == "Design" else "개발·론치"
+        if cat == "new":
+            return "백로그"
+        return "디자인 중"
+
+    def _one_row(n):
+        who = (F(n, "assignee", "displayName") or "").split("/")[0].strip()
+        if not _is_des(n, "assignee"):
+            rep = (F(n, "reporter", "displayName") or "").split("/")[0].strip()
+            if _is_des(n, "reporter") or not who:
+                who = rep or who
+        return [n["key"], _one_bucket(n), F(n, "issuetype", "name") or "", who or "-", F(n, "summary") or ""]
+
+    try:
+        one = []
+        for n in ftn:
+            ty = str(F(n, "issuetype", "name") or "")
+            if "Initiative" not in ty and "이니셔티브" not in ty:
+                continue
+            cr = day(F(n, "created"))
+            if not cr or cr < CUT:
+                continue
+            labs = [str(l) for l in (F(n, "labels", default=[]) or [])]
+            dens = any(l.startswith("one밀도감") for l in labs)
+            if _is_des(n, "assignee") or dens or ("design-driven" in labs and _is_des(n, "reporter")):
+                one.append(_one_row(n))
+        ONE_LABS = ",".join('"one밀도감_%s"' % x for x in
+                            ("디스커버리", "코어UX", "코어ux", "커머스", "인게이지먼트", "공통", "29CM"))
+        pdn = jql(f'project = PD AND labels in ({ONE_LABS}) AND created >= "{CUT}" '
+                  f'AND issuetype in (Epic, "Design") ORDER BY key ASC', FLD, cap=400)
+        one += [_one_row(n) for n in pdn]
+        if len(one) < 20:
+            raise RuntimeError(f"ONE 결과가 비정상적으로 적음({len(one)}건)")
+        D["one"] = one
+        print(f"ONE {len(one)}건 (FT {len(one) - len(pdn)} · PD {len(pdn)})")
+    except Exception as e:
+        print(f"  ONE 자동 갱신 실패({e}) — 스냅샷 사용")
+        D["one"] = load_sealed("one") or []
     D["nodN"] = len(D["one"])
+
+    # ── 7.2 슬랙 의장 보고(#one-제품디자인실) — 봇 토큰이 있으면 자동 갱신 ──
+    D["sl"] = slack_reports(people, ft) or load_sealed("slack") or []
 
     # ── 7.5 예정 디자인 수요 (runway 분기 플래닝 스냅샷) ──
     #   runway 내부 데이터(디자인 디펜던시 팀 지정)는 Jira에 없어 스냅샷으로 봉인해 둔다(runway.enc).

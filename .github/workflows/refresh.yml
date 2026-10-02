@@ -44,6 +44,7 @@ jobs:
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
           GATE_PASS:  ${{ secrets.GATE_PASS }}
           PXD_LEAVE_ICAL: ${{ secrets.PXD_LEAVE_ICAL }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}   # #one-제품디자인실 읽기 전용 봇 (없으면 스냅샷)
         run: python build.py
       - name: 변경분 커밋
         run: |
