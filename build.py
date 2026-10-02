@@ -257,6 +257,7 @@ def compute_leave(names):
             for d in _weekdays(e.get("start", ""), e.get("end", "")):
                 if in_range(d):
                     hol[_wkid(d)] = hol.get(_wkid(d), 0) + 1
+                if today - datetime.timedelta(weeks=27) <= d <= hi:   # 주간 기록 기준일(금→직전 영업일) 라벨용, 지난 26주까지
                     hold.add(d.isoformat())
     except Exception as ex:
         print("공휴일 iCal 실패(폴백 시도):", ex)
