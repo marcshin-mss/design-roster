@@ -940,6 +940,7 @@ def main():
                 _crs = [day(F(meta.get(r[0]) or {}, "created")) for r in rows]
                 _crs = [c for c in _crs if c]
                 x["q"] = quarter_of(min(_crs)) if _crs else ""
+                x["c0"] = min(_crs) if _crs else ""          # 과제 시작일(첫 티켓 생성) — 주간 사이즈 그래프 x축 시작
                 if d.get("bucket") or tname == BUCKET:
                     x["bkt"] = 1
                 if d.get("own"):
@@ -1311,7 +1312,7 @@ def main():
     #   실효 사이즈 = 워커 공유 오버라이드(sz) 우선, 없으면 basis.tasks 기본값.
     #   basis._sizehist = {weeks:[{w,d}...최근26], wk:{<키>:{"2026-W39":"L"}}}
     #   <키>: 과제명 (담당자별로 나뉘는 디자인QA 는 "과제명\u0001담당자" 키도 함께).
-    if os.environ.get("SNAP_WEEK") == "1":
+    if True:   # 매 빌드마다 이번 주 값을 덮어쓴다 → 그 주 마지막 빌드 값이 최종 (2026-10-02: 금 20시 크론 지연으로 주가 빠지던 문제)
         try:
             now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
             iso = now_kst.isocalendar()
@@ -1320,9 +1321,7 @@ def main():
             weeks = sh.setdefault("weeks", [])
             wkmap = sh.setdefault("wk", {})
             done_w = {(w.get("w") if isinstance(w, dict) else w) for w in weeks}
-            if wk in done_w:
-                print("사이즈 스냅샷: %s 이미 기록됨 — 건너뜀" % wk)
-            else:
+            if True:
                 SEP = "\u0001"
                 ovr = fetch_overrides()
                 eff = {}
@@ -1335,7 +1334,8 @@ def main():
                 for k, u in ovr.items():
                     if SEP in k and isinstance(u, dict) and u.get("s"):
                         eff[k] = u["s"]
-                weeks.append({"w": wk, "d": now_kst.strftime("%Y-%m-%d")})
+                weeks[:] = [w for w in weeks if (w.get("w") if isinstance(w, dict) else w) != wk] + \
+                    [{"w": wk, "d": now_kst.strftime("%Y-%m-%d")}]
                 for k, s in eff.items():
                     wkmap.setdefault(k, {})[wk] = s
                 weeks[:] = weeks[-26:]
@@ -1352,7 +1352,7 @@ def main():
     #   대시보드 loadPass(now) 와 동일 산식으로 멤버별 이번 주 부하(md)와 가용(md)을 기록.
     #   basis._loadhist = {weeks:[{w,d}...최근26], mem:{"<이름>":{t:"<팀키>", w:{"2026-W39":[loadmd,capmd]}}}}
     #   조직·팀 추이는 멤버 합으로 유도(대시보드), 개인 추이는 이번 주부터 누적.
-    if os.environ.get("SNAP_WEEK") == "1":
+    if True:   # 매 빌드마다 이번 주 값을 덮어쓴다 → 그 주 마지막 빌드 값이 최종 (2026-10-02: 금 20시 크론 지연으로 주가 빠지던 문제)
         try:
             now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
             iso = now_kst.isocalendar()
@@ -1361,9 +1361,7 @@ def main():
             lweeks = lh.setdefault("weeks", [])
             lmem = lh.setdefault("mem", {})
             done_w = {(w.get("w") if isinstance(w, dict) else w) for w in lweeks}
-            if wk in done_w:
-                print("리소스 스냅샷: %s 이미 기록됨 — 건너뜀" % wk)
-            else:
+            if True:
                 SEP = "\u0001"
                 ovr = fetch_overrides()
                 bands = basis.get("size_bands") or {"XS": 2, "S": 5, "M": 10, "L": 18, "XL": 30}
@@ -1392,7 +1390,8 @@ def main():
                         return bands.get(u["s"], d1)
                     return d1
 
-                lweeks.append({"w": wk, "d": now_kst.strftime("%Y-%m-%d")})
+                lweeks[:] = [w for w in lweeks if (w.get("w") if isinstance(w, dict) else w) != wk] + \
+                    [{"w": wk, "d": now_kst.strftime("%Y-%m-%d")}]
                 for tm in D["teams"]:
                     k = tm["k"]
                     cap = round(_availMd(k), 2)
