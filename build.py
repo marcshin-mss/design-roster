@@ -965,92 +965,78 @@ def main():
     D["doneN"] = sum(len(m["dn"]) for t in D["teams"] for m in t["members"])
     D["holdN"] = sum(len(m["hd"]) for t in D["teams"] for m in t["members"])
 
-    # ── 7. FT 흐름 ─────────────────────────────────────────────────
-    ftn = jql("project = FT ORDER BY key ASC", FLD, cap=1200)
-    kids = set(F(n, "parent", "key") for n in ftn if F(n, "parent", "key"))
+    # ── 7. FT 흐름 · ONE 보드 — 같은 과제 집합 (Marc 2026-10-02) ──────────────
+    #   대상: FT 프로젝트 이니셔티브(7/1 이후 생성) 중
+    #     · 담당자가 디자인 조직(org 가 'Design' 으로 끝남)이거나
+    #     · design-driven 라벨이 있거나
+    #     · one밀도감_* 라벨이 있는 건
+    #   PD 의 one밀도감 건은 FT 로 진행될 때 FT 로 넘어오므로 따로 넣지 않는다.
+    #   단위는 이니셔티브(하위 에픽·티켓은 행으로 세지 않음).
+    #   상태 6단계: 백로그 · 디자인 중 · 디자인 완료 · 개발 중 · 론치 완료 · 중단
+    #   FT 탭 버킷: todo=백로그 / wip=디자인 중·디자인 완료·개발 중 / done=론치 완료 / drop=중단
+    ftn = jql("project = FT ORDER BY key ASC", FLD, cap=1500)
     tmof = {m["name"]: t["name"] for t in teams for m in t["members"]}
-    ft = []
+
+    def _is_des(n, f):
+        return org_of(F(n, f, "displayName") or "").endswith("Design")
+
+    LAUNCH_ST = {"론치완료", "배포완료", "완료", "개발완료", "Done"}
+
+    def _stage(n):
+        st = str(F(n, "status", "name") or "")
+        cat = str(F(n, "status", "statusCategory", "key") or "")
+        if st in DROP_ST or any(w in st for w in ("철회", "반려", "취소", "Drop")):
+            return "중단"
+        if st in LAUNCH_ST or cat == "done":
+            return "론치 완료"
+        if st in ("Backlog", "SUGGESTED", "할일", "To Do") or cat == "new":
+            return "백로그"
+        if st.replace(" ", "") == "디자인완료":
+            return "디자인 완료"
+        if any(w in st for w in ("개발", "QA", "배포", "론치", "Launch", "Release", "검수")):
+            return "개발 중"
+        return "디자인 중"
+
+    STG2B = {"백로그": "todo", "론치 완료": "done", "중단": "drop"}
+
+    ft, one = [], []
     for n in ftn:
-        if n["key"] in kids:
-            continue
-        who = (F(n, "assignee", "displayName") or "").split("/")[0].strip()
-        labs = [str(l) for l in (F(n, "labels", default=[]) or [])]
-        if who not in people and "design-driven" not in labs:
+        ty = str(F(n, "issuetype", "name") or "")
+        if "Initiative" not in ty and "이니셔티브" not in ty:
             continue
         cr = day(F(n, "created"))
         if not cr or cr < CUT:
             continue
+        labs = [str(l) for l in (F(n, "labels", default=[]) or [])]
+        dd = "design-driven" in labs
+        dens = any(l.startswith("one밀도감") for l in labs)
+        if not (_is_des(n, "assignee") or dd or dens):
+            continue
+        asg = (F(n, "assignee", "displayName") or "").split("/")[0].strip()
+        rep = (F(n, "reporter", "displayName") or "").split("/")[0].strip()
+        who = asg if (asg and (asg in people or _is_des(n, "assignee"))) else \
+              (rep if (rep in people or _is_des(n, "reporter")) else asg)
+        stg = _stage(n)
         st = F(n, "status", "name") or ""
-        ft.append([n["key"], cr, day(F(n, "resolutiondate")), bucket_of(st), st,
-                   who if who in people else (who or ""),
-                   tmof.get(who, "미배정" if not who else "그 외"), F(n, "summary") or "",
+        ft.append([n["key"], cr, day(F(n, "resolutiondate")), STG2B.get(stg, "wip"), st,
+                   who or "", tmof.get(who, "미배정" if not who else "그 외"), F(n, "summary") or "",
                    day(F(n, "updated"))])
+        one.append([n["key"], stg, ty, who or "-", F(n, "summary") or "",
+                    ("d" if dd else "") + ("o" if dens else "")])
     ft.sort(key=lambda r: (r[1], r[0]))
-    D["ft"] = ft
-    print(f"FT {len(ft)}건")
-
-    # ── 7.1 ONE 보드 (design-driven) — 지라에서 자동 갱신 (Marc 2026-10-02) ──
-    #   FT 이니셔티브(7/1 이후 생성) 중
-    #     · 담당자가 디자인 조직(org 가 'Design' 으로 끝남)이거나
-    #     · design-driven 라벨 + 보고자가 디자인 조직이거나
-    #     · one밀도감_* 라벨이 붙은 건
-    #   + PD 프로젝트의 one밀도감_* 라벨 에픽·디자인 티켓.
-    #   실패하면 리포의 봉인 스냅샷(one.enc)으로 대체한다.
-    def _is_des(n, f):
-        return org_of(F(n, f, "displayName") or "").endswith("Design")
-
-    def _one_bucket(n):
-        st = str(F(n, "status", "name") or "")
-        cat = str(F(n, "status", "statusCategory", "key") or "")
-        ty = str(F(n, "issuetype", "name") or "")
-        if st in DROP_ST or any(w in st for w in ("철회", "반려", "취소", "Drop")):
-            return "중단"
-        if st in ("Backlog", "SUGGESTED", "할일", "To Do"):
-            return "백로그"
-        if st.replace(" ", "") == "디자인완료":
-            return "디자인 완료"
-        if any(w in st for w in ("개발", "론치", "배포", "QA", "Launch", "Release")):
-            return "개발·론치"
-        if cat == "done":
-            return "디자인 완료" if ty == "Design" else "개발·론치"
-        if cat == "new":
-            return "백로그"
-        return "디자인 중"
-
-    def _one_row(n):
-        who = (F(n, "assignee", "displayName") or "").split("/")[0].strip()
-        if not _is_des(n, "assignee"):
-            rep = (F(n, "reporter", "displayName") or "").split("/")[0].strip()
-            if _is_des(n, "reporter") or not who:
-                who = rep or who
-        return [n["key"], _one_bucket(n), F(n, "issuetype", "name") or "", who or "-", F(n, "summary") or ""]
-
-    try:
-        one = []
-        for n in ftn:
-            ty = str(F(n, "issuetype", "name") or "")
-            if "Initiative" not in ty and "이니셔티브" not in ty:
-                continue
-            cr = day(F(n, "created"))
-            if not cr or cr < CUT:
-                continue
-            labs = [str(l) for l in (F(n, "labels", default=[]) or [])]
-            dens = any(l.startswith("one밀도감") for l in labs)
-            if _is_des(n, "assignee") or dens or ("design-driven" in labs and _is_des(n, "reporter")):
-                one.append(_one_row(n))
-        ONE_LABS = ",".join('"one밀도감_%s"' % x for x in
-                            ("디스커버리", "코어UX", "코어ux", "커머스", "인게이지먼트", "공통", "29CM"))
-        pdn = jql(f'project = PD AND labels in ({ONE_LABS}) AND created >= "{CUT}" '
-                  f'AND issuetype in (Epic, "Design") ORDER BY key ASC', FLD, cap=400)
-        one += [_one_row(n) for n in pdn]
-        if len(one) < 20:
-            raise RuntimeError(f"ONE 결과가 비정상적으로 적음({len(one)}건)")
-        D["one"] = one
-        print(f"ONE {len(one)}건 (FT {len(one) - len(pdn)} · PD {len(pdn)})")
-    except Exception as e:
-        print(f"  ONE 자동 갱신 실패({e}) — 스냅샷 사용")
+    one.sort(key=lambda r: r[0])
+    if len(one) < 20:
+        print(f"  FT·ONE 결과가 비정상적으로 적음({len(one)}건) — 스냅샷 사용")
+        D["ft"] = ft
         D["one"] = load_sealed("one") or []
+    else:
+        D["ft"] = ft
+        D["one"] = one
     D["nodN"] = len(D["one"])
+    _sc = {}
+    for r in one:
+        _sc[r[1]] = _sc.get(r[1], 0) + 1
+    print(f"FT·ONE {len(one)}건 {_sc}")
 
     # ── 7.2 슬랙 의장 보고(#one-제품디자인실) — 봇 토큰이 있으면 자동 갱신 ──
     D["sl"] = slack_reports(people, ft) or load_sealed("slack") or []
