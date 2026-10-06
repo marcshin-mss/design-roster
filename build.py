@@ -801,8 +801,9 @@ def main():
             continue   # 팀별 과제의 '예정'은 SUGGESTED 상태만 (Backlog·할일 등 제외)
         tname = next((anchor[c] for c in [key] + chain(key) if c in anchor), None)
         if not tname:
-            root = next((c for c in reversed(chain(key))
-                         if F(meta.get(c, {}), "issuetype", "name") in ("Initiative", "Epic")), None)
+            # 새 과제의 단위는 가장 가까운 에픽(없으면 이니셔티브) — 과제 묶음 기준 (Marc 2026-10-06)
+            root = next((c for c in chain(key) if F(meta.get(c, {}), "issuetype", "name") == "Epic"), None) or \
+                next((c for c in chain(key) if F(meta.get(c, {}), "issuetype", "name") == "Initiative"), None)
             if root and sum(1 for m2 in issues
                             if root in chain(m2["key"])
                             and (F(m2, "assignee", "displayName") or "").split("/")[0].strip() == who) >= 2:
@@ -829,6 +830,63 @@ def main():
                                            "bucket": False, "anchors": [key]}
                     fresh.append(tname)
         per.setdefault(who, {}).setdefault(tname, []).append([key, summ, st, None, F(n, "project", "key")])
+
+    # ── 4.5 에픽 단위 분리 (서정명 제보 · Marc 2026-10-06) ──────────────
+    #   한 과제에 서로 다른 에픽(QA 에픽 제외)의 티켓이 섞이면 에픽마다 별도 과제로 나눈다.
+    #   예) 'AI 패션 코디네이터 도입' = PD-8805(이정수) + PD-10001(유정선) → 에픽별 2과제.
+    #   에픽 없이 이니셔티브 바로 아래 붙은 티켓은 원래 과제에 남는다.
+    #   예외: MERGE_ANCHORS 로 Marc 가 명시 승인한 병합 과제는 그대로 둔다(나누려면 거기서 빼야 함).
+    MERGE_NAMES = set(MERGE_ANCHORS.values())
+
+    def near_epic(k):
+        return next((c for c in chain(k) if F(meta.get(c, {}), "issuetype", "name") == "Epic"), None)
+
+    _tk_ep = {}
+    for _w, _tasks in per.items():
+        for _tn, _rows in _tasks.items():
+            if _tn in MERGE_NAMES or _tn == BUCKET or _tn.startswith(BUCKET + " · "):
+                continue
+            for _r in _rows:
+                _ep = near_epic(_r[0])
+                if _ep and not is_qa(F(meta.get(_ep, {}), "summary") or ""):
+                    _tk_ep.setdefault(_tn, set()).add(_ep)
+    SPLIT = {}
+    for _tn, _eps in _tk_ep.items():
+        if len(_eps) < 2:
+            continue
+        _base = tax["tasks"].get(_tn, {})
+        for _ep in _eps:
+            _nm = clean_name(F(meta.get(_ep, {}), "summary") or _ep)
+            if _nm == _tn:
+                continue
+            SPLIT[(_tn, _ep)] = _nm
+            if _nm not in tax["tasks"]:
+                tax["tasks"][_nm] = {"domain": _base.get("domain", "기타 서비스"),
+                                     "badges": [b for b in _base.get("badges", []) if b not in ("신규", "오너")],
+                                     "initiative": _ep, "platform": _base.get("platform", "무신사"),
+                                     "bucket": False, "anchors": [_ep], "split_from": _tn}
+                fresh.append(_nm)
+            anchor[_ep] = _nm
+    for _w, _tasks in per.items():
+        for _tn in list(_tasks.keys()):
+            _keep = []
+            for _r in _tasks[_tn]:
+                _nn = SPLIT.get((_tn, near_epic(_r[0])))
+                if _nn:
+                    _tasks.setdefault(_nn, []).append(_r)
+                else:
+                    _keep.append(_r)
+            if _keep:
+                _tasks[_tn] = _keep
+            else:
+                del _tasks[_tn]
+    for _w, _rows in done.items():
+        for _r in _rows:
+            if len(_r) > 5 and _r[5]:
+                _nn = SPLIT.get((_r[5], near_epic(_r[0])))
+                if _nn:
+                    _r[5] = _nn
+    print("에픽 단위 분리: %d과제 → %d에픽" % (len({k[0] for k in SPLIT}), len(SPLIT)))
 
     for w in done:
         done[w].sort(key=lambda r: r[3] or "", reverse=True)
@@ -1454,7 +1512,7 @@ def main():
     print(f"과제 {D['taskN']} 티켓 {D['tkN']} 진행중 {D['actN']} 예정 {D['rowN']} "
           f"보류 {D['holdN']} 완료 {D['doneN']}")
     if fresh:
-        print("새 과제: " + ", ".join(fresh))
+        print("새 과제: %d건" % len(fresh))   # 이름은 공개 로그에 남기지 않는다
 
 
 if __name__ == "__main__":
