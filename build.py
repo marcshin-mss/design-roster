@@ -642,7 +642,7 @@ def main():
         'PD-9061': '[유즈드] 판매·정산 운영 개선',
         'PD-9207': '[유즈드] 판매·정산 운영 개선',
         'PD-9209': '[유즈드] 판매·정산 운영 개선',
-        'TM-518': '[유즈드] 판매·정산 운영 개선',
+        # 'TM-518'(인게이지먼트 팀 이니셔티브)는 병합에서 뺌 — KTLO·앱테크 에픽까지 유즈드로 묶여서 (Marc 2026-10-06)
         'PD-8865': '[유즈드] 판매·정산 운영 개선',
         'TM-3111': '[유즈드] 판매·정산 운영 개선',
         'PD-8133': '[유즈드] 판매·정산 운영 개선',
@@ -660,7 +660,7 @@ def main():
         'M29CMPROD-1653': '[브랜드광고] 광고판 운영 (무신사·29CM)',
         'M29CMPROD-1639': '[브랜드광고] 광고판 운영 (무신사·29CM)',
         'PD-9373': '[브랜드광고] 광고판 운영 (무신사·29CM)',
-        'MSS-194': '[브랜드광고] 광고판 운영 (무신사·29CM)',
+        # 'MSS-194'(MSS 2026 KTLO)는 병합에서 뺌 — VOC·리서치·KTLO 에픽까지 광고판으로 묶여서 (Marc 2026-10-06)
         'PD-10018': '[탐색] 카테고리 메뉴 개선 (블루닷·이미지 4열)',
         'PD-10160': '[탐색] 카테고리 메뉴 개선 (블루닷·이미지 4열)',
         'PD-10101': '[탐색] AI 태그 노출·태깅 자동화 대응',
@@ -888,6 +888,22 @@ def main():
                     _r[5] = _nn
     print("에픽 단위 분리: %d과제 → %d에픽" % (len({k[0] for k in SPLIT}), len(SPLIT)))
 
+    # ── 4.6 공유 에픽은 담당자별로 (Marc 2026-10-06) ──
+    #   같은 에픽(또는 에픽 없이 같은 이니셔티브 직속)을 여러 명이 맡는 과제는 사람별로 따로 본다 —
+    #   한 사람 과제를 열면 그 사람 티켓만, 사이즈도 사람별(디자인QA 버킷과 같은 방식). 병합 과제는 제외.
+    PERWHO = set()
+    _grp = {}
+    for _w, _tasks in per.items():
+        for _tn, _rows in _tasks.items():
+            if _tn in MERGE_NAMES or _tn == BUCKET or _tn.startswith(BUCKET + " · "):
+                continue
+            for _r in _rows:
+                _grp.setdefault((_tn, near_epic(_r[0])), set()).add(_w)
+    for (_tn, _ep), _ws in _grp.items():
+        if len(_ws) >= 2:
+            PERWHO.add(_tn)
+    print("담당자별 과제: %d건" % len(PERWHO))
+
     for w in done:
         done[w].sort(key=lambda r: r[3] or "", reverse=True)
 
@@ -939,7 +955,8 @@ def main():
         return out
 
     D = {"teams": [], "themes": tax["themes"], "sum": tax["summaries"], "short": tax.get("short", {}),
-         "asof": (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")}
+         "asof": (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M"),
+         "perwho": sorted(PERWHO)}
     for t in teams:
         tm = {"k": t["key"], "name": t["name"], "lead": t["lead"],
               "n": len(t["members"]), "order": 0, "md": 0, "members": [], "over": 0, "hold": 0}
@@ -1449,7 +1466,7 @@ def main():
                 def _effHours(tname, who):
                     d0 = ((basis["tasks"].get(tname) or {}).get("size")) or "M"
                     d1 = (basis["tasks"].get(tname) or {}).get("hours", 9)
-                    split = tname.startswith("디자인QA")
+                    split = tname.startswith("디자인QA") or tname in PERWHO
                     u = ovr.get(tname + SEP + who) if (split and ovr.get(tname + SEP + who)) else ovr.get(tname)
                     if not isinstance(u, dict):
                         u = {}
