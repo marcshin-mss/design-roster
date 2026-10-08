@@ -511,7 +511,7 @@ def main():
     name_of = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
 
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
-           "created", "resolutiondate", "labels", "project", "updated", "description", "priority"]
+           "created", "resolutiondate", "labels", "project", "updated", "description", "priority", "duedate"]
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -1042,6 +1042,82 @@ def main():
     D["rowN"]  = D["tkN"] - D["actN"]
     D["doneN"] = sum(len(m["dn"]) for t in D["teams"] for m in t["members"])
     D["holdN"] = sum(len(m["hd"]) for t in D["teams"] for m in t["members"])
+
+    # ── 6.5 지표 탭 보조 데이터 (Marc 2026-10-08 지표 개편) ─────────────────
+    #   tkm   : 과제에 붙은 티켓별 [최종 업데이트일, 마감일] — 정체·마감 경보용
+    #   flow  : 최근 14주 주별 티켓 인입(생성)·완료 건수 (철회/Dropped 제외) — 조직·팀
+    #   orphan: 디자이너 담당 '진행 중' 에픽인데 아래 디자인 티켓이 없는 건 — 데이터 누락 경보
+    #   ※ CI 로그는 공개 — 건수만 출력한다.
+    try:
+        _tkm = {}
+        for _t in D["teams"]:
+            for _m in _t["members"]:
+                for _x in _m["tasks"]:
+                    for _r in _x["tk"]:
+                        _n = meta.get(_r[0])
+                        if _n:
+                            _tkm[_r[0]] = [day(F(_n, "updated")) or "", day(F(_n, "duedate")) or ""]
+        D["tkm"] = _tkm
+        print("티켓 메타: %d건" % len(_tkm))
+    except Exception as _e:
+        print("티켓 메타 건너뜀:", type(_e).__name__)
+    try:
+        _nowk = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).date()
+        _mon0 = _nowk - datetime.timedelta(days=_nowk.weekday())
+        _wks = [(_mon0 - datetime.timedelta(weeks=i)).isoformat() for i in range(13, -1, -1)]
+        _wix = {w: i for i, w in enumerate(_wks)}
+
+        def _wkof(ds):
+            try:
+                _d = datetime.date.fromisoformat(ds[:10])
+            except Exception:
+                return None
+            return (_d - datetime.timedelta(days=_d.weekday())).isoformat()
+        _fl = {"w": _wks, "org": {"in": [0] * 14, "out": [0] * 14}, "team": {}}
+        for _t in teams:
+            _fl["team"][_t["key"]] = {"in": [0] * 14, "out": [0] * 14}
+        for _n in issues:
+            _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
+            if _who not in people:
+                continue
+            if (F(_n, "status", "name") or "") in DROP_ST:
+                continue
+            _tk = people[_who][0]["key"]
+            _i = _wix.get(_wkof(day(F(_n, "created")) or ""))
+            if _i is not None:
+                _fl["org"]["in"][_i] += 1
+                _fl["team"][_tk]["in"][_i] += 1
+            if state_of(_n) == "완료":
+                _j = _wix.get(_wkof(day(F(_n, "resolutiondate")) or ""))
+                if _j is not None:
+                    _fl["org"]["out"][_j] += 1
+                    _fl["team"][_tk]["out"][_j] += 1
+        D["flow"] = _fl
+        print("주간 흐름: %d주" % len(_wks))
+    except Exception as _e:
+        print("주간 흐름 건너뜀:", type(_e).__name__)
+    try:
+        _eps = jql(f'issuetype = Epic AND assignee in {IN} AND statusCategory = "In Progress" '
+                   f'AND created >= "{LEAD}" ORDER BY key ASC',
+                   ["summary", "assignee", "updated", "status", "created"], cap=400)
+        _alive = set()
+        for _n in issues:
+            if state_of(_n) in ("진행 중", "예정"):
+                _alive.update(chain(_n["key"]))
+        _intask = {_r[0] for _t in D["teams"] for _m in _t["members"] for _x in _m["tasks"] for _r in _x["tk"]}
+        _orph = []
+        for _n in _eps:
+            _k = _n["key"]
+            if _k in _alive or _k in _intask:
+                continue
+            _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
+            if _who not in people:
+                continue
+            _orph.append([_k, F(_n, "summary") or "", _who, day(F(_n, "updated")) or "", day(F(_n, "created")) or ""])
+        D["orphan"] = _orph
+        print("티켓 없는 진행 에픽: %d건" % len(_orph))
+    except Exception as _e:
+        print("에픽 점검 건너뜀:", type(_e).__name__)
 
     # ── 7. FT 흐름 · ONE 보드 — 같은 과제 집합 (Marc 2026-10-02) ──────────────
     #   대상: FT 프로젝트 이니셔티브(7/1 이후 생성) 중
