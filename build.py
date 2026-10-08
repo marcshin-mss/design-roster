@@ -273,6 +273,9 @@ def compute_leave(names):
             if nm not in names:
                 continue
             frac = 0.25 if "반반차" in summ else (0.5 if "반차" in summ else 1.0)
+            # 건강검진(반일 공가)+반차 = 하루 전체 부재 (예: "[건강검진 + 오후반차] 이름"), Marc 2026-10-08
+            if "건강검진" in summ and frac < 1.0:
+                frac = min(1.0, frac + 0.5)
             for d in _weekdays(e.get("start", ""), e.get("end", "")):
                 if in_range(d):
                     vac.setdefault(nm, {})
@@ -282,7 +285,7 @@ def compute_leave(names):
         return load_sealed("leave") or {}
 
     print("휴가·공휴일 iCal 반영: 공휴일주 %d, 휴가인원 %d" % (len(hol), len(vac)))
-    return {"asof": today.strftime("%Y-%m-%d"), "hol": hol, "hold": sorted(hold), "vac": vac}
+    return {"asof": today.strftime("%Y-%m-%d"), "src": "ical", "hol": hol, "hold": sorted(hold), "vac": vac}
 
 
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN", "")
