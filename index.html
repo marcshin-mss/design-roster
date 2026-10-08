@@ -772,7 +772,7 @@ let APP=null;
 async function loadApp(pw){
   if(APP)return APP;
   if(pw){
-    const r=await fetch("app.enc",{cache:"no-cache"});
+    const r=await fetch("app.enc?t="+Date.now(),{cache:"no-store"});
     if(r.ok){ APP=JSON.parse(await decrypt(await r.json(),pw)); return APP; }
   }
   const r2=await fetch("app.json",{cache:"no-cache"});
@@ -800,7 +800,7 @@ function boot(dataText,basis){
        if(c.ok) window.__SYNC=await c.json(); }catch(e){}
   let raw;
   try{
-    const a=await fetch("data.json",{cache:"no-cache"});
+    const a=await fetch("data.json?t="+Date.now(),{cache:"no-store"});
     if(!a.ok) throw new Error("파일을 받지 못했습니다");
     window.__DTAG=a.headers.get("etag")||a.headers.get("last-modified")||"";
     raw=await a.json();
