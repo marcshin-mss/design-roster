@@ -272,10 +272,15 @@ def compute_leave(names):
             nm = summ.split("]", 1)[1].strip()
             if nm not in names:
                 continue
-            frac = 0.25 if "반반차" in summ else (0.5 if "반차" in summ else 1.0)
-            # 건강검진(반일 공가)+반차 = 하루 전체 부재 (예: "[건강검진 + 오후반차] 이름"), Marc 2026-10-08
-            if "건강검진" in summ and frac < 1.0:
-                frac = min(1.0, frac + 0.5)
+            # 건강검진은 반일(0.5). 같이 적은 휴가를 더한다 — 반차 +0.5 · 반반차 +0.25 · 연차/휴가 = 하루 (최대 1일)
+            #   예) [건강검진] 0.5 · [건강검진/오후반차]·[건강검진 + 반차] 1 · [건강검진 연차] 1  (Marc 2026-10-08)
+            if "건강검진" in summ:
+                _rest = summ.split("]", 1)[0].replace("건강검진", "")
+                _add = 0.25 if "반반차" in _rest else (0.5 if "반차" in _rest else
+                                                    (0.5 if ("연차" in _rest or "휴가" in _rest) else 0.0))
+                frac = min(1.0, 0.5 + _add)
+            else:
+                frac = 0.25 if "반반차" in summ else (0.5 if "반차" in summ else 1.0)
             for d in _weekdays(e.get("start", ""), e.get("end", "")):
                 if in_range(d):
                     vac.setdefault(nm, {})
