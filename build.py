@@ -1243,6 +1243,49 @@ def main():
     #   단위는 이니셔티브(하위 에픽·티켓은 행으로 세지 않음).
     #   상태 6단계: 백로그 · 디자인 중 · 디자인 완료 · 개발 중 · 론치 완료 · 중단
     #   FT 탭 버킷: todo=백로그 / wip=디자인 중·디자인 완료·개발 중 / done=론치 완료 / drop=중단
+    # ── 6.6 이번 분기 주요 프로젝트 (지표 탭 최상단 · Marc 2026-10-13) ──────────────
+    #   디자이너 티켓을 가장 가까운 이니셔티브(없으면 에픽)로 모아, 이니셔티브의 우선순위·상태·상위 목표와 함께 싣는다.
+    #   주제 묶음·진행 단계 판정은 화면(app)에서 한다. 이번 분기 시작 전에 끝난 티켓·철회 티켓은 뺀다. CI 로그엔 건수만.
+    try:
+        _nk = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).date()
+        _qs = datetime.date(_nk.year, 3 * ((_nk.month - 1) // 3) + 1, 1).isoformat()
+
+        def _ty(k):
+            return str(F(meta.get(k, {}), "issuetype", "name") or "")
+        _pjt, _pje = {}, {}
+        for _n in issues:
+            _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
+            if _who not in people:
+                continue
+            _st = state_of(_n)
+            _sn = F(_n, "status", "name") or ""
+            if _sn in DROP_ST:
+                continue
+            if _st == "완료" and (day(F(_n, "resolutiondate")) or "") < _qs:
+                continue
+            _ch = chain(_n["key"])
+            _ini = next((c for c in _ch if "Initiative" in _ty(c) or "이니셔티브" in _ty(c)), None)
+            _ep = next((c for c in _ch if _ty(c) == "Epic"), None)
+            _root = _ini or _ep or "-"
+            if _ep:
+                _pje[_ep] = F(meta.get(_ep, {}), "summary") or ""
+            _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn,
+                                               day(F(_n, "resolutiondate")) or ""])
+        _pj = {}
+        for _r in _pjt:
+            if _r == "-":
+                continue
+            _m = meta.get(_r, {})
+            _par = parent.get(_r)
+            _pj[_r] = [F(_m, "summary") or "", F(_m, "priority", "name") or "", F(_m, "status", "name") or "",
+                       str(F(_m, "status", "statusCategory", "key") or ""),
+                       (F(meta.get(_par, {}), "summary") or "") if _par else "",
+                       day(F(_m, "duedate")) or "", _ty(_r), day(F(_m, "created")) or "",
+                       day(F(_m, "resolutiondate")) or ""]
+        D["pj"] = {"qs": _qs, "init": _pj, "tk": _pjt, "ep": _pje}
+        print("분기 프로젝트: 상위 %d개 · 티켓 %d건" % (len(_pj), sum(len(v) for v in _pjt.values())))
+    except Exception as _e:
+        print("분기 프로젝트 건너뜀:", type(_e).__name__)
     try:
         apply_assignments({m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")})
     except Exception as _e:
