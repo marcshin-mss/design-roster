@@ -94,6 +94,52 @@ def adf_text(node):
     return ""
 
 
+def adf_md(node, depth=0):
+    """Jira 설명(ADF) → 가벼운 마크다운 (대시보드 미리보기용, Marc 2026-10-13).
+    제목(heading)은 '## ', 굵게는 **…**, 링크는 [글](url), 목록은 '• ' — 앱이 이 표시만 해석해 그린다."""
+    if node is None:
+        return ""
+    if isinstance(node, list):
+        return "".join(adf_md(x, depth) for x in node)
+    if not isinstance(node, dict):
+        return str(node) if isinstance(node, str) else ""
+    t = node.get("type")
+    at = node.get("attrs") or {}
+    if t == "text":
+        tx = node.get("text", "")
+        href, strong = None, False
+        for m in node.get("marks") or []:
+            if m.get("type") == "link":
+                href = (m.get("attrs") or {}).get("href")
+            elif m.get("type") == "strong":
+                strong = True
+        if href:
+            tx = tx if tx.strip() == href else "[%s](%s)" % (tx.replace("]", ")"), href)
+        if strong and tx.strip():
+            tx = "**%s**" % tx
+        return tx
+    if t == "hardBreak":
+        return "\n"
+    if t in ("inlineCard", "blockCard", "embedCard"):
+        u = at.get("url") or ""
+        return (u + ("\n" if t != "inlineCard" else "")) if u else ""
+    if t in ("mention", "emoji", "status", "date"):
+        return str(at.get("text") or at.get("shortName") or "")
+    inner = adf_md(node.get("content"), depth + (1 if t in ("bulletList", "orderedList") else 0))
+    if t == "heading":
+        return "## " + inner.strip() + "\n"
+    if t == "listItem":
+        lines = inner.strip("\n").split("\n")
+        return "  " * max(0, depth - 1) + "• " + ("\n" + "  " * depth).join(lines) + "\n"
+    if t in ("paragraph", "blockquote", "codeBlock", "tableRow"):
+        return inner + "\n"
+    if t in ("bulletList", "orderedList"):
+        return inner
+    if t == "tableCell" or t == "tableHeader":
+        return inner.strip() + " | "
+    return inner
+
+
 def _compact(s):
     return re.sub(r"\s", "", s or "")
 
@@ -1250,7 +1296,7 @@ def main():
                    day(F(n, "updated"))])
         one.append([n["key"], stg, ty, who or "-", F(n, "summary") or "",
                     ("d" if dd else "") + ("o" if dens else ""),
-                    adf_text(F(n, "description")).strip()[:1500], day(F(n, "updated")) or "", st, asg or "",
+                    re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:2500], day(F(n, "updated")) or "", st, asg or "",
                     [l for l in labs if l.startswith("one밀도감") or l == "design-driven"]])
     ft.sort(key=lambda r: (r[1], r[0]))
     one.sort(key=lambda r: r[0])
