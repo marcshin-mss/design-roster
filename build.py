@@ -169,6 +169,67 @@ def fetch_overrides():
         return {}
 
 
+def fetch_shared():
+    """워커 공유 기준 전체(복호화)를 가져온다. 실패하면 {}."""
+    if not GATE:
+        return {}
+    try:
+        req = urllib.request.Request(
+            SYNC_URL, headers={"User-Agent": "Mozilla/5.0 design-roster-snap"})
+        box = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+        if not box or not box.get("ct"):
+            return {}
+        d = json.loads(decrypt(box, GATE))
+        return d if isinstance(d, dict) else {}
+    except Exception as e:
+        print("공유 기준 가져오기 실패(무시):", type(e).__name__)
+        return {}
+
+
+def apply_assignments(acct_of):
+    """대시보드에서 요청한 담당자 배정(공유 기준 asg)을 지라에 반영한다 (Marc 2026-10-13).
+    asg = {이슈키: {to: 이름, by: 요청자, at: ISO시각}}
+    요청 시각이 이슈의 마지막 수정보다 나중일 때만 바꾼다 → 한 번 반영되면(이슈 updated 가 갱신) 다시 덮어쓰지 않고,
+    요청 뒤에 지라에서 직접 바꾼 경우도 존중한다. CI 로그에는 건수만 남긴다."""
+    asg = (fetch_shared().get("asg") or {})
+    if not isinstance(asg, dict) or not asg:
+        return 0
+    keys = [k for k, v in asg.items() if isinstance(v, dict) and v.get("to") and re.match(r"^[A-Z][A-Z0-9]+-\d+$", k)]
+    if not keys:
+        return 0
+    cur = {}
+    for i in range(0, len(keys), 45):
+        for n in jql("key in (%s)" % ",".join(keys[i:i + 45]), ["assignee", "updated"]):
+            cur[n["key"]] = n
+    done = fail = 0
+    for k in keys:
+        ent, n = asg[k], cur.get(k)
+        aid = acct_of.get(ent.get("to"))
+        if not n or not aid:
+            continue
+        if (F(n, "assignee", "accountId") or "") == aid:
+            continue
+        try:
+            req_at = datetime.datetime.fromisoformat(str(ent.get("at", "")).replace("Z", "+00:00"))
+            upd = datetime.datetime.strptime(F(n, "updated"), "%Y-%m-%dT%H:%M:%S.%f%z")
+        except Exception:
+            continue
+        if req_at <= upd:
+            continue   # 요청 뒤 지라에서 직접 바뀜 → 그대로 둔다
+        try:
+            req = urllib.request.Request(
+                BASE + "/rest/api/3/issue/%s/assignee" % k, method="PUT",
+                data=json.dumps({"accountId": aid}).encode(),
+                headers={"Authorization": "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode(),
+                         "Content-Type": "application/json", "Accept": "application/json"})
+            urllib.request.urlopen(req, timeout=30).read()
+            done += 1
+        except Exception:
+            fail += 1
+    print("담당자 배정 반영: %d건%s" % (done, (" (실패 %d건)" % fail) if fail else ""))
+    return done
+
+
 HOLIDAY_ICAL = ("https://calendar.google.com/calendar/ical/"
                 "ko.south_korea%23holiday%40group.v.calendar.google.com/public/basic.ics")
 # 공휴일 아님(제외): description 이 '공휴일' 이어도 빼는 것 + description 없을 때 블록리스트
@@ -1136,6 +1197,10 @@ def main():
     #   단위는 이니셔티브(하위 에픽·티켓은 행으로 세지 않음).
     #   상태 6단계: 백로그 · 디자인 중 · 디자인 완료 · 개발 중 · 론치 완료 · 중단
     #   FT 탭 버킷: todo=백로그 / wip=디자인 중·디자인 완료·개발 중 / done=론치 완료 / drop=중단
+    try:
+        apply_assignments({m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")})
+    except Exception as _e:
+        print("담당자 배정 건너뜀:", type(_e).__name__)
     ftn = jql("project = FT ORDER BY key ASC", FLD, cap=1500)
     tmof = {m["name"]: t["name"] for t in teams for m in t["members"]}
 
@@ -1184,7 +1249,9 @@ def main():
                    who or "", tmof.get(who, "미배정" if not who else "그 외"), F(n, "summary") or "",
                    day(F(n, "updated"))])
         one.append([n["key"], stg, ty, who or "-", F(n, "summary") or "",
-                    ("d" if dd else "") + ("o" if dens else "")])
+                    ("d" if dd else "") + ("o" if dens else ""),
+                    adf_text(F(n, "description")).strip()[:1500], day(F(n, "updated")) or "", st, asg or "",
+                    [l for l in labs if l.startswith("one밀도감") or l == "design-driven"]])
     ft.sort(key=lambda r: (r[1], r[0]))
     one.sort(key=lambda r: r[0])
     if len(one) < 20:
