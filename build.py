@@ -1300,15 +1300,19 @@ def main():
             return out
 
         _rwq = {_pq: _rw_rows(_pq), _cq: _rw_rows(_cq)}
+        # 팀장 배정판(열무) 임시 정보 — Marc 10-15: 지라와 겹치면 지라가 맞다. 이번 분기에만 쓴다.
+        #   {키: {t: 팀, o: [임시 담당], sz: 사이즈, nn: 디자인 불필요, add: Runway 디자인 디펜던시 밖에서 팀장이 추가}}
+        _lead = ((_rwd.get("lead") or {}).get("items")) or {}
+        _ldas = (_rwd.get("lead") or {}).get("asof", "")
         try:
-            _allk = sorted({k for v in _rwq.values() for k in v if k not in meta})
+            _allk = sorted(({k for v in _rwq.values() for k in v} | set(_lead)) - set(meta))
             for i in range(0, len(_allk), 45):
                 for n in jql("key in (%s)" % ",".join(_allk[i:i + 45]), FLD):
                     meta[n["key"]] = n
                     p = F(n, "parent", "key")
                     if p:
                         parent[n["key"]] = p
-            _np = sorted({parent.get(k) for v in _rwq.values() for k in v} - {None} - set(meta))
+            _np = sorted(({parent.get(k) for v in _rwq.values() for k in v} | {parent.get(k) for k in _lead}) - {None} - set(meta))
             for i in range(0, len(_np), 45):
                 for n in jql("key in (%s)" % ",".join(_np[i:i + 45]), FLD):
                     meta[n["key"]] = n
@@ -1370,6 +1374,23 @@ def main():
                     continue
                 _pj[_k] = _inf
                 _add += 1
+            # 팀장 배정판 반영(이번 분기): 디자인 불필요 + 디자인 티켓 없음 → 뺀다 / 팀장이 추가한 건 → 싣는다
+            _ld = {}
+            if cur and _lead:
+                for _k, _v in _lead.items():
+                    if _v.get("nn") and _k in _pj and _k not in _pjt:
+                        _pj.pop(_k, None)
+                        continue
+                    if _v.get("nn"):
+                        continue
+                    if _k not in _pj:
+                        _inf = _info(_k, [[], "", "", "", ""])
+                        if not _inf[0] or _inf[2] in DROP_ST or any(w in str(_inf[2]) for w in ("철회", "반려", "취소", "Dropped")):
+                            continue
+                        if (_inf[8] and _inf[8] < qs) or (_inf[7] and _inf[7] >= qe):
+                            continue
+                        _pj[_k] = _inf
+                    _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or ""]
             # 분기 계획 여부 (Marc 10-15): ① Runway 그 분기 플래닝 보드에 어느 팀이든 ATL 로 올라간 이니셔티브
             #   ② 지라 분기 라벨(Y26Q4 · 26'4Q · runway-2026_q4_플래닝-<팀>-atl) — 29CM 은 라벨로 분기 계획을 관리한다.
             #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨)}
@@ -1389,7 +1410,8 @@ def main():
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
             return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje,
-                    "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl}
+                    "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
+                    "ld": _ld, "ldas": _ldas if _ld else ""}
 
         D["pjq"] = {}
         for _q0, _cur in ((_pq, False), (_cq, True)):
