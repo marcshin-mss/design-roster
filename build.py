@@ -1370,10 +1370,26 @@ def main():
                     continue
                 _pj[_k] = _inf
                 _add += 1
-            print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d)" % (
-                _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add))
+            # 분기 계획 여부 (Marc 10-15): ① Runway 그 분기 플래닝 보드에 어느 팀이든 ATL 로 올라간 이니셔티브
+            #   ② 지라 분기 라벨(Y26Q4 · 26'4Q · runway-2026_q4_플래닝-<팀>-atl) — 29CM 은 라벨로 분기 계획을 관리한다.
+            #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨)}
+            _lab = _qrw(q0)
+            _yy, _qn = q0.year % 100, (q0.month - 1) // 3 + 1
+            _qtok = {"Y%02dQ%d" % (_yy, _qn), "%02d'%dQ" % (_yy, _qn), "%02dQ%d" % (_yy, _qn), "%d-Q%d" % (q0.year, _qn)}
+            _rprefix = "runway-%d_q%d_플래닝-" % (q0.year, _qn)
+            _atl = set(((_rwd.get("plan") or {}).get(_lab) or {}).get("atl") or [])
+            _pl = {}
+            for _k in _pj:
+                if _k in _atl:
+                    _pl[_k] = "r"
+                    continue
+                _lb = [str(x) for x in (F(meta.get(_k, {}), "labels") or [])]
+                if any(x in _qtok for x in _lb) or any(x.startswith(_rprefix) and x.endswith("-atl") for x in _lb):
+                    _pl[_k] = "l"
+            print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
+                _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
             return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje,
-                    "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas}
+                    "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl}
 
         D["pjq"] = {}
         for _q0, _cur in ((_pq, False), (_cq, True)):
