@@ -1282,8 +1282,60 @@ def main():
                        (F(meta.get(_par, {}), "summary") or "") if _par else "",
                        day(F(_m, "duedate")) or "", _ty(_r), day(F(_m, "created")) or "",
                        day(F(_m, "resolutiondate")) or ""]
-        D["pj"] = {"qs": _qs, "init": _pj, "tk": _pjt, "ep": _pje}
-        print("분기 프로젝트: 상위 %d개 · 티켓 %d건" % (len(_pj), sum(len(v) for v in _pjt.values())))
+        # runway 이번 분기 계획 중 Biz-P 디자인 4팀이 메인/디펜던시로 붙은 이니셔티브 — 디자인 티켓이 아직 없어도 싣는다(Marc 2026-10-15).
+        #   rw = {키: [디자인팀들, runway 우선순위, runway 상태, sc(new=착수 전)]}. 지라에서 현재 상태·우선순위·상위 목표를 다시 읽는다.
+        _rw6, _add, _rwas = {}, 0, ""
+        try:
+            _rwq = "%d-Q%d" % (_nk.year, (_nk.month - 1) // 3 + 1)
+            _BIZD = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design"}
+            _rwd = load_sealed("runway") or {}
+            _rwas = _rwd.get("asof", "")
+            for _row in (_rwd.get("rows") or []):
+                _k = _row.get("k")
+                _tm = [t.replace("*", "").strip() for t in (_row.get("t") or [])]
+                _tm = [t for t in _tm if t in _BIZD]
+                if not _k or not _tm or _rwq not in [q.strip() for q in str(_row.get("q") or "").split(",")]:
+                    continue
+                _rw6[_k] = [_tm, _row.get("pri") or "", _row.get("st") or "", _row.get("sc") or "", _row.get("n") or ""]
+            _need6 = [k for k in _rw6 if k not in meta]
+            for i in range(0, len(_need6), 45):
+                try:
+                    for n in jql("key in (%s)" % ",".join(_need6[i:i + 45]), FLD):
+                        meta[n["key"]] = n
+                        p = F(n, "parent", "key")
+                        if p:
+                            parent[n["key"]] = p
+                except Exception:
+                    pass
+            _np = [p for p in {parent.get(k) for k in _rw6} if p and p not in meta]
+            for i in range(0, len(_np), 45):
+                try:
+                    for n in jql("key in (%s)" % ",".join(_np[i:i + 45]), FLD):
+                        meta[n["key"]] = n
+                except Exception:
+                    pass
+            for _k, _v in _rw6.items():
+                if _k in _pj:
+                    continue
+                _m = meta.get(_k, {})
+                _sn = F(_m, "status", "name") or _v[2]
+                if _sn in DROP_ST or any(w in str(_sn) for w in ("철회", "반려", "취소", "Dropped")):
+                    continue
+                _rs = day(F(_m, "resolutiondate")) or ""
+                if _rs and _rs < _qs:
+                    continue
+                _par = parent.get(_k)
+                _pj[_k] = [F(_m, "summary") or _v[4], F(_m, "priority", "name") or _v[1], _sn,
+                           str(F(_m, "status", "statusCategory", "key") or ""),
+                           (F(meta.get(_par, {}), "summary") or "") if _par else "",
+                           day(F(_m, "duedate")) or "", _ty(_k) or "Initiative", day(F(_m, "created")) or "", _rs]
+                _add += 1
+        except Exception as _e:
+            print("runway 계획 반영 건너뜀:", type(_e).__name__)
+        D["pj"] = {"qs": _qs, "init": _pj, "tk": _pjt, "ep": _pje,
+                   "rw": {k: v[:4] for k, v in _rw6.items()}, "rwas": _rwas}
+        print("분기 프로젝트: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d)" % (
+            len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add))
     except Exception as _e:
         print("분기 프로젝트 건너뜀:", type(_e).__name__)
     try:
