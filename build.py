@@ -1295,7 +1295,8 @@ def main():
                         continue
                 elif lab not in _qq:
                     continue
-                out[_k] = [_tm, _row.get("pri") or "", _row.get("st") or "", _row.get("sc") or "", _row.get("n") or ""]
+                out[_k] = [_tm, _row.get("pri") or "", _row.get("st") or "", _row.get("sc") or "", _row.get("n") or "",
+                           1 if _row.get("btl") else 0]
             return out
 
         _rwq = {_pq: _rw_rows(_pq), _cq: _rw_rows(_cq)}
@@ -1372,7 +1373,7 @@ def main():
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d)" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add))
             return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje,
-                    "rw": {k: v[:4] for k, v in _rw6.items()}, "rwas": _rwas}
+                    "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas}
 
         D["pjq"] = {}
         for _q0, _cur in ((_pq, False), (_cq, True)):
