@@ -1415,7 +1415,10 @@ def main():
                 if any(x in _qtok for x in _lb) or any(x.startswith(_rprefix) and x.endswith("-atl") for x in _lb):
                     _pl[_k] = "l"
                     continue
-                if _k in _patl or any(x in _pqtok for x in _lb) or any(x.startswith(_prprefix) and x.endswith("-atl") for x in _lb):
+                # 이월은 아직 안 끝난 것만 — 론치·완료된 건 제외 (Marc 10-16 "론치된건 빼")
+                _ii = _pj[_k]
+                _done = str(_ii[3]) == "done" or any(w in str(_ii[2]) for w in ("론치", "완료", "Done", "Closed"))
+                if not _done and (_k in _patl or any(x in _pqtok for x in _lb) or any(x.startswith(_prprefix) and x.endswith("-atl") for x in _lb)):
                     _pl[_k] = "c"
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
