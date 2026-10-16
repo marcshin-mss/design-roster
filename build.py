@@ -1393,12 +1393,19 @@ def main():
                     _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or ""]
             # 분기 계획 여부 (Marc 10-15): ① Runway 그 분기 플래닝 보드에 어느 팀이든 ATL 로 올라간 이니셔티브
             #   ② 지라 분기 라벨(Y26Q4 · 26'4Q · runway-2026_q4_플래닝-<팀>-atl) — 29CM 은 라벨로 분기 계획을 관리한다.
-            #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨)}
+            #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨) | "c"(직전 분기 계획 이월)}
             _lab = _qrw(q0)
             _yy, _qn = q0.year % 100, (q0.month - 1) // 3 + 1
             _qtok = {"Y%02dQ%d" % (_yy, _qn), "%02d'%dQ" % (_yy, _qn), "%02dQ%d" % (_yy, _qn), "%d-Q%d" % (q0.year, _qn)}
             _rprefix = "runway-%d_q%d_플래닝-" % (q0.year, _qn)
             _atl = set(((_rwd.get("plan") or {}).get(_lab) or {}).get("atl") or [])
+            # ③ 이월 계획 (Marc 10-16, AI Fashion Coordinator 건): 직전 분기에 ①·② 기준으로 계획됐고
+            #   이번 분기까지 이어지는 이니셔티브 → 계획. pl "c". (Runway 는 읽기만 — 보드는 Q3·Q4 두 개뿐, CBP 별도 보드 없음)
+            _p0 = datetime.date(q0.year if q0.month > 3 else q0.year - 1, (q0.month - 4) % 12 + 1, 1)
+            _pyy, _pqn = _p0.year % 100, (_p0.month - 1) // 3 + 1
+            _pqtok = {"Y%02dQ%d" % (_pyy, _pqn), "%02d'%dQ" % (_pyy, _pqn), "%02dQ%d" % (_pyy, _pqn), "%d-Q%d" % (_p0.year, _pqn)}
+            _prprefix = "runway-%d_q%d_플래닝-" % (_p0.year, _pqn)
+            _patl = set(((_rwd.get("plan") or {}).get(_qrw(_p0)) or {}).get("atl") or [])
             _pl = {}
             for _k in _pj:
                 if _k in _atl:
@@ -1407,6 +1414,9 @@ def main():
                 _lb = [str(x) for x in (F(meta.get(_k, {}), "labels") or [])]
                 if any(x in _qtok for x in _lb) or any(x.startswith(_rprefix) and x.endswith("-atl") for x in _lb):
                     _pl[_k] = "l"
+                    continue
+                if _k in _patl or any(x in _pqtok for x in _lb) or any(x.startswith(_prprefix) and x.endswith("-atl") for x in _lb):
+                    _pl[_k] = "c"
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
             return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje,
