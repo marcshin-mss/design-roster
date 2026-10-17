@@ -1159,7 +1159,7 @@ def main():
     D["holdN"] = sum(len(m["hd"]) for t in D["teams"] for m in t["members"])
 
     # ── 6.5 지표 탭 보조 데이터 (Marc 2026-10-08 지표 개편) ─────────────────
-    #   tkm   : 과제에 붙은 티켓별 [최종 업데이트일, 마감일] — 정체·마감 경보용
+    #   tkm   : 과제에 붙은 티켓별 [최종 업데이트일, 마감일, 생성일] — 정체·마감 경보, 지표 탭 분기 리소스 투입(생성일)
     #   flow  : 최근 14주 주별 티켓 인입(생성)·완료 건수 (철회/Dropped 제외) — 조직·팀
     #   orphan: 디자이너 담당 '진행 중' 에픽인데 아래 디자인 티켓이 없는 건 — 데이터 누락 경보
     #   ※ CI 로그는 공개 — 건수만 출력한다.
@@ -1171,7 +1171,7 @@ def main():
                     for _r in _x["tk"]:
                         _n = meta.get(_r[0])
                         if _n:
-                            _tkm[_r[0]] = [day(F(_n, "updated")) or "", day(F(_n, "duedate")) or ""]
+                            _tkm[_r[0]] = [day(F(_n, "updated")) or "", day(F(_n, "duedate")) or "", day(F(_n, "created")) or ""]
         D["tkm"] = _tkm
         print("티켓 메타: %d건" % len(_tkm))
     except Exception as _e:
