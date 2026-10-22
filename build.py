@@ -1302,6 +1302,7 @@ def main():
         _rwq = {_pq: _rw_rows(_pq), _cq: _rw_rows(_cq)}
         # 팀장 배정판(열무) 임시 정보 — Marc 10-15: 지라와 겹치면 지라가 맞다. 이번 분기에만 쓴다.
         #   {키: {t: 팀, o: [임시 담당], sz: 사이즈, nn: 디자인 불필요, add: Runway 디자인 디펜던시 밖에서 팀장이 추가}}
+        #   bs: {담당: 보드 상태 대기|진행|f/up|완료|보류} — Core UX 보드(10-19)처럼 사람별 상태를 적은 판만. 티켓 없을 때 화면 상태로 쓴다.
         _lead = ((_rwd.get("lead") or {}).get("items")) or {}
         _ldas = (_rwd.get("lead") or {}).get("asof", "")
         try:
@@ -1390,7 +1391,7 @@ def main():
                         if (_inf[8] and _inf[8] < qs) or (_inf[7] and _inf[7] >= qe):
                             continue
                         _pj[_k] = _inf
-                    _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or ""]
+                    _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or "", _v.get("bs") or {}]
             # 분기 계획 여부 (Marc 10-15): ① Runway 그 분기 플래닝 보드에 어느 팀이든 ATL 로 올라간 이니셔티브
             #   ② 지라 분기 라벨(Y26Q4 · 26'4Q · runway-2026_q4_플래닝-<팀>-atl) — 29CM 은 라벨로 분기 계획을 관리한다.
             #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨) | "c"(직전 분기 계획 이월)}
