@@ -344,8 +344,11 @@ def compute_leave(names):
     PXD_LEAVE_ICAL(휴가 캘린더 비공개 iCal) 있으면 매 빌드 자동 갱신,
     없으면 봉인된 leave.enc 로 폴백."""
     vac_url = os.environ.get("PXD_LEAVE_ICAL", "").strip()
+    snap = None
     if not vac_url:
-        return load_sealed("leave") or {}
+        # 휴가는 봉인 스냅샷(leave.enc — 매일 예약 작업이 'PXD 휴가 공유' 캘린더를 읽어 갱신, 2026-10-27),
+        # 공휴일은 아래에서 공개 iCal 로 매 빌드 계산한다.
+        snap = load_sealed("leave") or {}
     today = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).date()
     lo = today - datetime.timedelta(weeks=2)
     hi = today + datetime.timedelta(weeks=20)
@@ -369,6 +372,11 @@ def compute_leave(names):
     except Exception as ex:
         print("공휴일 iCal 실패(폴백 시도):", ex)
         hol = ((load_sealed("leave") or {}).get("hol")) or {}
+
+    if snap is not None:
+        print("공휴일 iCal 반영: 공휴일주 %d · 휴가는 스냅샷 %s" % (len(hol), snap.get("asof", "?")))
+        return {"asof": snap.get("asof", ""), "src": snap.get("src", "snap"), "hol": hol or snap.get("hol") or {},
+                "hold": sorted(hold) or snap.get("hold") or [], "vac": snap.get("vac") or {}}
 
     vac = {}
     try:
