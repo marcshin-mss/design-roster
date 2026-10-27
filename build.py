@@ -634,7 +634,8 @@ def main():
     name_of = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
 
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
-           "created", "resolutiondate", "labels", "project", "updated", "description", "priority", "duedate"]
+           "created", "resolutiondate", "labels", "project", "updated", "description", "priority", "duedate",
+           "customfield_10015"]   # 시작 날짜
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -1330,7 +1331,7 @@ def main():
 
         def _pj_build(q0, cur):
             qs, qe = q0.isoformat(), _qnx(q0).isoformat()
-            _pjt, _pje = {}, {}
+            _pjt, _pje, _pjd = {}, {}, {}   # _pjd: 에픽 [시작, 기한, 상태]
             for _n in issues:
                 _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
                 if _who not in people:
@@ -1353,7 +1354,10 @@ def main():
                 _root = _ini or _ep or "-"
                 if _ep:
                     _pje[_ep] = F(meta.get(_ep, {}), "summary") or ""
-                _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn, _rs])
+                    _em = meta.get(_ep, {})
+                    _pjd[_ep] = [day(F(_em, "customfield_10015")) or "", day(F(_em, "duedate")) or "", F(_em, "status", "name") or ""]
+                _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn, _rs,
+                                                   day(F(_n, "customfield_10015")) or "", day(F(_n, "duedate")) or ""])
 
             def _info(k, fb=None):
                 _m = meta.get(k, {})
@@ -1363,7 +1367,7 @@ def main():
                        str(F(_m, "status", "statusCategory", "key") or ""),
                        (F(meta.get(_par, {}), "summary") or "") if _par else "",
                        day(F(_m, "duedate")) or "", _ty(k) or "Initiative", day(F(_m, "created")) or "",
-                       day(F(_m, "resolutiondate")) or ""]
+                       day(F(_m, "resolutiondate")) or "", day(F(_m, "customfield_10015")) or ""]   # [9] 시작 날짜
                 if not cur and inf[8] and inf[8] >= qe:     # 분기 뒤에 끝남 → 분기 말엔 진행 중
                     inf[2], inf[3], inf[8] = "분기 말 진행 중", "indeterminate", ""
                 return inf
@@ -1431,7 +1435,7 @@ def main():
                     _pl[_k] = "c"
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
-            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje,
+            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje, "epd": _pjd,
                     "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
                     "ld": _ld, "ldas": _ldas if _ld else ""}
 
