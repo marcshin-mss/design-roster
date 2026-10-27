@@ -1357,7 +1357,7 @@ def main():
                     _em = meta.get(_ep, {})
                     _pjd[_ep] = [day(F(_em, "customfield_10015")) or "", day(F(_em, "duedate")) or "", F(_em, "status", "name") or ""]
                 _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn, _rs,
-                                                   day(F(_n, "customfield_10015")) or "", day(F(_n, "duedate")) or ""])
+                                                   day(F(_n, "customfield_10015")) or "", day(F(_n, "duedate")) or "", _cr])   # [9] 생성일
 
             def _info(k, fb=None):
                 _m = meta.get(k, {})
