@@ -667,9 +667,19 @@ def main():
         print("디자이너 에픽 조회 건너뜀:", type(_e).__name__)
     print(f"디자이너 담당 에픽 {len(depics)}건")
 
+    # ── 2-2. 팀장이 담당자인 이니셔티브 (KTLO 상시 운영 등 — 팀 전체 현황 관리용, 서정명 10-27) ──
+    linits = []
+    try:
+        if leads:
+            linits = jql(f'issuetype = Initiative AND assignee in {LIN} '
+                         f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
+    except Exception as _e:
+        print("팀장 이니셔티브 조회 건너뜀:", type(_e).__name__)
+    print(f"팀장 담당 이니셔티브 {len(linits)}건")
+
     # ── 3. 조상 체인 (CBP 판정 · 과제 매칭용) ──────────────────────
     parent, meta = {}, {}
-    for n in issues + epics + depics:
+    for n in issues + epics + depics + linits:
         meta[n["key"]] = n
         p = F(n, "parent", "key")
         if p:
@@ -1455,9 +1465,23 @@ def main():
                 _done = str(_ii[3]) == "done" or any(w in str(_ii[2]) for w in ("론치", "완료", "Done", "Closed"))
                 if not _done and (_k in _patl or any(x in _pqtok for x in _lb) or any(x.startswith(_prprefix) and x.endswith("-atl") for x in _lb)):
                     _pl[_k] = "c"
+            # 팀장 담당 이니셔티브 → {키: 팀장 이름} (그 분기에 걸친 것만, HOLD·드롭 제외)
+            _lo = {}
+            for _n in linits:
+                _k = _n["key"]
+                _wl = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
+                if _wl not in people:
+                    continue
+                _li = _info(_k)
+                if _li[2] in DROP_ST or _li[2] == "HOLD" or any(w in str(_li[2]) for w in ("철회", "반려", "취소", "Dropped")):
+                    continue
+                if (_li[8] and _li[8] < qs) or (_li[7] and _li[7] >= qe):
+                    continue
+                _pj.setdefault(_k, _li)
+                _lo[_k] = _wl
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
-            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje, "epd": _pjd, "dx": {k: v for k, v in _pjx.items() if v},
+            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "lo": _lo, "tk": _pjt, "ep": _pje, "epd": _pjd, "dx": {k: v for k, v in _pjx.items() if v},
                     "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
                     "ld": _ld, "ldas": _ldas if _ld else ""}
 
