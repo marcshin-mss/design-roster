@@ -677,9 +677,19 @@ def main():
         print("팀장 이니셔티브 조회 건너뜀:", type(_e).__name__)
     print(f"팀장 담당 이니셔티브 {len(linits)}건")
 
+    # ── 2-3. 디자이너 담당 부작업(하위 작업) — 상위 Task 아래에서 실제 일이 진행되는 경우(권해솜 리서치 10-27) ──
+    subs = []
+    try:
+        subs = jql(f'issuetype in subTaskIssueTypes() AND assignee in {IN} '
+                   f'AND (created >= "{CUT}" OR (created >= "{LEAD}" AND statusCategory = "In Progress" AND status != "HOLD")) '
+                   f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
+    except Exception as _e:
+        print("부작업 조회 건너뜀:", type(_e).__name__)
+    print(f"디자이너 부작업 {len(subs)}건")
+
     # ── 3. 조상 체인 (CBP 판정 · 과제 매칭용) ──────────────────────
     parent, meta = {}, {}
-    for n in issues + epics + depics + linits:
+    for n in issues + epics + depics + linits + subs:
         meta[n["key"]] = n
         p = F(n, "parent", "key")
         if p:
@@ -1361,7 +1371,8 @@ def main():
                     return re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:1200]
                 except Exception:
                     return ""
-            for _n in issues + depics:
+            _subk = {x["key"] for x in subs}
+            for _n in issues + depics + subs:
                 _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
                 if _who not in people:
                     continue
@@ -1381,6 +1392,8 @@ def main():
                 _ini = next((c for c in _ch if "Initiative" in _ty(c) or "이니셔티브" in _ty(c)), None)
                 _ep = _n["key"] if _ty(_n["key"]) == "Epic" else next((c for c in _ch if _ty(c) == "Epic"), None)   # 담당 에픽은 자기 자신이 에픽
                 _root = _ini or _ep or "-"
+                if _n["key"] in _subk and _root == "-":
+                    continue        # 에픽·이니셔티브에 안 걸린 부작업(데이터 추출 요청 등)은 뺀다
                 if _ep:
                     _pje[_ep] = F(meta.get(_ep, {}), "summary") or ""
                     _em = meta.get(_ep, {})
