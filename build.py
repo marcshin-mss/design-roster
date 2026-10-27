@@ -654,9 +654,22 @@ def main():
                     f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
     print(f"팀장 에픽 {len(epics)}건")
 
+    # ── 2-1. 디자이너가 담당자인 에픽 (개발자 전달·디자인 QA 에픽 등 — 아래 디자인 티켓 없이 에픽으로만 일하는 경우, 손효정 10-27) ──
+    depics = []
+    try:
+        _nl = [a for a in accts if a not in set(leads.values())]
+        if _nl:
+            _NIN = "(" + ",".join('"%s"' % a for a in _nl) + ")"
+            depics = jql(f'issuetype = Epic AND assignee in {_NIN} '
+                         f'AND (created >= "{CUT}" OR statusCategory = "In Progress") '
+                         f'AND (statusCategory != Done OR resolved >= "{CUT}") ORDER BY key ASC', FLD)
+    except Exception as _e:
+        print("디자이너 에픽 조회 건너뜀:", type(_e).__name__)
+    print(f"디자이너 담당 에픽 {len(depics)}건")
+
     # ── 3. 조상 체인 (CBP 판정 · 과제 매칭용) ──────────────────────
     parent, meta = {}, {}
-    for n in issues + epics:
+    for n in issues + epics + depics:
         meta[n["key"]] = n
         p = F(n, "parent", "key")
         if p:
@@ -1338,7 +1351,7 @@ def main():
                     return re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:1200]
                 except Exception:
                     return ""
-            for _n in issues:
+            for _n in issues + depics:
                 _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
                 if _who not in people:
                     continue
@@ -1356,7 +1369,7 @@ def main():
                     _st, _rs = "진행 중", ""          # 분기 말엔 아직 진행 중이었다
                 _ch = chain(_n["key"])
                 _ini = next((c for c in _ch if "Initiative" in _ty(c) or "이니셔티브" in _ty(c)), None)
-                _ep = next((c for c in _ch if _ty(c) == "Epic"), None)
+                _ep = _n["key"] if _ty(_n["key"]) == "Epic" else next((c for c in _ch if _ty(c) == "Epic"), None)   # 담당 에픽은 자기 자신이 에픽
                 _root = _ini or _ep or "-"
                 if _ep:
                     _pje[_ep] = F(meta.get(_ep, {}), "summary") or ""
