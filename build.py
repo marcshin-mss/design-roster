@@ -1331,7 +1331,13 @@ def main():
 
         def _pj_build(q0, cur):
             qs, qe = q0.isoformat(), _qnx(q0).isoformat()
-            _pjt, _pje, _pjd = {}, {}, {}   # _pjd: 에픽 [시작, 기한, 상태]
+            _pjt, _pje, _pjd, _pjx = {}, {}, {}, {}   # _pjd: 에픽 [시작, 기한, 상태] · _pjx: 티켓·에픽 설명(마크다운, 1200자)
+
+            def _desc(n):
+                try:
+                    return re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:1200]
+                except Exception:
+                    return ""
             for _n in issues:
                 _who = (F(_n, "assignee", "displayName") or "").split("/")[0].strip()
                 if _who not in people:
@@ -1356,6 +1362,9 @@ def main():
                     _pje[_ep] = F(meta.get(_ep, {}), "summary") or ""
                     _em = meta.get(_ep, {})
                     _pjd[_ep] = [day(F(_em, "customfield_10015")) or "", day(F(_em, "duedate")) or "", F(_em, "status", "name") or ""]
+                    if _ep not in _pjx:
+                        _pjx[_ep] = _desc(_em)
+                _pjx[_n["key"]] = _desc(_n)
                 _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn, _rs,
                                                    day(F(_n, "customfield_10015")) or "", day(F(_n, "duedate")) or "", _cr])   # [9] 생성일
 
@@ -1435,7 +1444,7 @@ def main():
                     _pl[_k] = "c"
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
-            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje, "epd": _pjd,
+            return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "tk": _pjt, "ep": _pje, "epd": _pjd, "dx": {k: v for k, v in _pjx.items() if v},
                     "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
                     "ld": _ld, "ldas": _ldas if _ld else ""}
 
