@@ -1448,7 +1448,7 @@ def main():
                         if (_inf[8] and _inf[8] < qs) or (_inf[7] and _inf[7] >= qe):
                             continue
                         _pj[_k] = _inf
-                    _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or "", _v.get("bs") or {}]
+                    _ld[_k] = [_v.get("o") or [], _v.get("sz") or "", _v.get("t") or "", _v.get("bs") or {}, 1 if _v.get("btl") else 0]   # [4] 팀장 판 BTL(10-28)
             # 분기 계획 여부 (Marc 10-15): ① Runway 그 분기 플래닝 보드에 어느 팀이든 ATL 로 올라간 이니셔티브
             #   ② 지라 분기 라벨(Y26Q4 · 26'4Q · runway-2026_q4_플래닝-<팀>-atl) — 29CM 은 라벨로 분기 계획을 관리한다.
             #   둘 다 없으면 분기 중 추가된 일. pl = {키: "r"(Runway) | "l"(라벨) | "c"(직전 분기 계획 이월)}
