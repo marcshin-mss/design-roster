@@ -1461,7 +1461,7 @@ def main():
                 _add += 1
             # 팀장 배정판 반영(이번 분기): 디자인 불필요 + 디자인 티켓 없음 → 뺀다 / 팀장이 추가한 건 → 싣는다
             _ld = {}
-            if cur and _lead and (not _ldas or qs.isoformat() <= _ldas[:10] < qe.isoformat()):   # 팀장 배정판은 그 분기에 만든 것만(다음 분기로 넘어가지 않게)
+            if cur and _lead and (not _ldas or str(qs)[:10] <= str(_ldas)[:10] < str(qe)[:10]):   # 팀장 배정판은 그 분기에 만든 것만(다음 분기로 넘어가지 않게)
                 for _k, _v in _lead.items():
                     if _v.get("nn") and _k in _pj and _k not in _pjt:
                         _pj.pop(_k, None)
