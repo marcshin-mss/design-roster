@@ -71,7 +71,8 @@ else
       commit -q -m "대시보드 갱신"
   git remote get-url origin >/dev/null 2>&1 || \
     git remote add origin https://github.com/marcshin-mss/design-roster.git
-  git pull --rebase --autostash -q origin main 2>/dev/null || true
+  # 브라우저(미리보기 배포하기 버튼)로 먼저 올라간 app.enc 와 겹치면 방금 봉인한 로컬 쪽을 쓴다 (Marc 10-29)
+  git pull --rebase --autostash -X theirs -q origin main 2>/dev/null || { git rebase --abort 2>/dev/null; true; }
   git push -u origin main
 fi
 
