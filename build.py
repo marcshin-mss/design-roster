@@ -538,6 +538,33 @@ def slack_reports(people, ft_rows):
         return None
 
 
+ARCH_FROM = "26 4Q"     # 분기 보관 시작(3Q 이전은 대시보드에서 뺌, Marc 2026-10-28)
+_OLD_D = []
+
+
+def _old_data():
+    """지난 빌드의 data.json(D). 없으면 None. 있는데 못 열면 중단 — 보관 분기를 잃지 않게 덮어쓰지 않는다."""
+    if _OLD_D:
+        return _OLD_D[0]
+    p = os.path.join(HERE, "data.json")
+    d = None
+    if os.path.exists(p):
+        try:
+            raw = json.load(open(p, encoding="utf-8"))
+            if isinstance(raw, dict) and "ct" in raw and "iv" in raw:
+                if not GATE:
+                    sys.exit("data.json 이 잠겨 있어 GATE_PASS 가 필요합니다(분기 보관을 읽기 위해).")
+                d = json.loads(decrypt(raw, GATE))
+            else:
+                d = raw
+        except SystemExit:
+            raise
+        except Exception as e:
+            sys.exit(f"지난 data.json 을 열지 못했습니다({type(e).__name__}) — 보관 분기를 지키려고 덮어쓰지 않습니다.")
+    _OLD_D.append(d)
+    return d
+
+
 def load_sealed(name):
     """name.enc(암호화) 우선, 없으면 name.json(평문). 둘 다 없으면 None."""
     p = os.path.join(HERE, name + ".enc")
@@ -1434,7 +1461,7 @@ def main():
                 _add += 1
             # 팀장 배정판 반영(이번 분기): 디자인 불필요 + 디자인 티켓 없음 → 뺀다 / 팀장이 추가한 건 → 싣는다
             _ld = {}
-            if cur and _lead:
+            if cur and _lead and (not _ldas or qs.isoformat() <= _ldas[:10] < qe.isoformat()):   # 팀장 배정판은 그 분기에 만든 것만(다음 분기로 넘어가지 않게)
                 for _k, _v in _lead.items():
                     if _v.get("nn") and _k in _pj and _k not in _pjt:
                         _pj.pop(_k, None)
@@ -1498,12 +1525,25 @@ def main():
                     "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
                     "ld": _ld, "ldas": _ldas if _ld else ""}
 
+        # 분기 보관 (Marc 2026-10-28): 26 4Q 부터 분기가 끝나면 그 분기 마지막 빌드 데이터를 그대로 보관한다.
+        #   지난 data.json 의 pjq 중 이번 분기가 아닌 분기(≥ ARCH_FROM)는 그대로 이어 싣고, 다시 만들지 않는다(지라가 바뀌어도 그 분기 숫자는 고정).
+        #   3Q 이전은 싣지 않는다(3Q 탭 없앰).
+        _arch = {}
+        for _qk, _pjo in (((_old_data() or {}).get("pjq")) or {}).items():
+            if _qk >= ARCH_FROM and _qk != _qlab(_cq) and isinstance(_pjo, dict) and _pjo.get("qs"):
+                _pjo["cur"] = 0
+                _arch[_qk] = _pjo
         D["pjq"] = {}
         for _q0, _cur in ((_pq, False), (_cq, True)):
+            if not _cur and (_qlab(_q0) < ARCH_FROM or _qlab(_q0) in _arch):
+                continue
             try:
                 D["pjq"][_qlab(_q0)] = _pj_build(_q0, _cur)
             except Exception as _e:
                 print("분기 프로젝트 %s 건너뜀:" % _qlab(_q0), type(_e).__name__)
+        D["pjq"].update(_arch)
+        if _arch:
+            print("보관 분기:", ", ".join(sorted(_arch)))
         if _qlab(_cq) in D["pjq"]:
             D["pj"] = D["pjq"][_qlab(_cq)]
     except Exception as _e:
@@ -1978,6 +2018,50 @@ def main():
             print("리소스 스냅샷 건너뜀:", _e)
 
     save_sealed("basis", basis)
+
+    # 이번 분기 보관용 정보(분기가 끝나면 이 상태로 고정된다, Marc 2026-10-28)
+    #   lv = 분기 동안 쌓은 휴가·공휴일(compute_leave 는 2주 전까지만 보므로 지난 주를 이어 붙임)
+    #   tm = 팀 구성 · rd/rb = 이니셔티브별 팀 분류·배지 · own = 팀장 본인 과제 — 다음 분기에 과제·사람이 바뀌어도 그대로 보이게
+    try:
+        _cpj = (D.get("pjq") or {}).get(_curq)
+        if _cpj and _curq >= ARCH_FROM:
+            _qs0 = datetime.date.fromisoformat(_cpj["qs"]); _qe0 = datetime.date.fromisoformat(_cpj["qe"])
+            _wks = set()
+            _d0 = _qs0
+            while _d0 < _qe0:
+                _wks.add(_wkid(_d0)); _d0 += datetime.timedelta(days=1)
+            _olv = ((((_old_data() or {}).get("pjq") or {}).get(_curq) or {}).get("lv")) or {}
+            _lvn = basis.get("_leave") or {}
+            _hol = {w: v for w, v in (_olv.get("hol") or {}).items() if w in _wks}
+            _hol.update({w: v for w, v in (_lvn.get("hol") or {}).items() if w in _wks})
+            _vac = {n: {w: v for w, v in ws.items() if w in _wks} for n, ws in (_olv.get("vac") or {}).items()}
+            for n, ws in (_lvn.get("vac") or {}).items():
+                for w, v in ws.items():
+                    if w in _wks:
+                        _vac.setdefault(n, {})[w] = v
+            _cpj["lv"] = {"hol": _hol, "vac": {n: w for n, w in _vac.items() if w}}
+            _cpj["tm"] = [{"k": t["k"], "name": t.get("name", ""), "members": [{"name": m["name"], "lead": bool(m.get("lead")), "role": m.get("role", "")} for m in t.get("members", [])]} for t in D.get("teams", [])]
+            _t2r = {r[0]: k for k, L in (_cpj.get("tk") or {}).items() for r in L}
+            _rd, _rb, _own = {}, {}, []
+            for t in D.get("teams", []):
+                for m in t.get("members", []):
+                    for x in m.get("tasks", []):
+                        if x.get("own"):
+                            _own.append({"who": m["name"], "team": t["k"], "x": {"t": x.get("t", ""), "b": x.get("b") or [], "tk": x.get("tk") or []}})
+                            continue
+                        for r in (x.get("tk") or []):
+                            k = _t2r.get(r[0])
+                            if not k:
+                                continue
+                            _rd.setdefault(k, {})
+                            _rd[k][x.get("th", "")] = _rd[k].get(x.get("th", ""), 0) + 1
+                            _rb.setdefault(k, set()).update(x.get("b") or [])
+            _cpj["rd"] = _rd
+            _cpj["rb"] = {k: sorted(v) for k, v in _rb.items()}
+            _cpj["own"] = _own
+            print("분기 보관 정보 %s: 휴가 주 %d · 팀 %d · 분류 %d" % (_curq, len(_hol) + sum(len(w) for w in _vac.values()), len(_cpj["tm"]), len(_rd)))
+    except Exception as _e:
+        print("분기 보관 정보 건너뜀:", type(_e).__name__, _e)
 
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
