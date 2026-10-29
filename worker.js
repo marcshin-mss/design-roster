@@ -70,6 +70,27 @@ async function verifyGoogle(token) {
   return email;
 }
 
+/* ── 배포 토큰 : 소유자(Marc) 구글 로그인 때 /auth 가 발급, /publish 가 검증 — 배포 암호 없이 배포 (Marc 10-29) ── */
+const DEPLOY_TTL = 24 * 3600;
+async function hmac(secret, msg) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg)));
+  return btoa(String.fromCharCode(...sig)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function deployToken(env, email) {
+  const body = btoa(JSON.stringify({ e: email, x: Math.floor(Date.now() / 1000) + DEPLOY_TTL })).replace(/=+$/, "");
+  return body + "." + await hmac("deploy:" + env.DEPLOY_HASH, body);
+}
+async function deployTokenOK(env, tok) {
+  try {
+    const [body, sig] = String(tok || "").split(".");
+    if (!body || !sig || !env.DEPLOY_HASH) return false;
+    if (sig !== await hmac("deploy:" + env.DEPLOY_HASH, body)) return false;
+    const p = JSON.parse(atob(body));
+    return p.e === OWNER && p.x > Math.floor(Date.now() / 1000);
+  } catch (e) { return false; }
+}
+
 async function allowList(env) {
   let a;
   try { a = JSON.parse((await env.ROSTER.get("kpi:allow")) || "null"); } catch (e) { a = null; }
@@ -93,7 +114,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": ORIGIN,
       "Access-Control-Allow-Methods": "GET,PUT,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "content-type,x-gate,x-deploy",
+      "Access-Control-Allow-Headers": "content-type,x-gate,x-deploy,x-deploy-token",
       "Access-Control-Max-Age": "86400",
     };
     if (req.method === "OPTIONS") return new Response(null, { headers: cors });
@@ -117,7 +138,8 @@ export default {
       if (!env.GATE_PASS) return J({ ok: false, error: "no-key" }, 501, cors);
       const allow = await allowList(env);
       return J({ ok: true, email, key: env.GATE_PASS,
-                 kpi: allow.includes(email), admin: email === OWNER }, 200, cors);
+                 kpi: allow.includes(email), admin: email === OWNER,
+                 deploy: email === OWNER && env.DEPLOY_HASH ? await deployToken(env, email) : undefined }, 200, cors);
     }
 
     /* ── 지표 허용목록 읽기/저장 (소유자 전용) ── */
@@ -150,7 +172,7 @@ export default {
 
     /* ── 자동 배포 : 봉인된 파일을 큐에 넣고 배포 워크플로를 깨운다 (배포 전용 암호) ── */
     if (req.method === "POST" && path === "/publish") {
-      if (!deployOK()) return J({ error: "deploy-gate" }, 403, cors);
+      if (!deployOK() && !(await deployTokenOK(env, req.headers.get("x-deploy-token")))) return J({ error: "deploy-gate" }, 403, cors);
       if (!env.GH_TOKEN) return J({ error: "no token" }, 501, cors);
       const body = await req.text();
       if (body.length > 12 * 1024 * 1024) return J({ error: "too large" }, 413, cors);
