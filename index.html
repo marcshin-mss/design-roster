@@ -764,7 +764,7 @@ window.__seal=async(objText,pw)=>{
   const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:250000,hash:"SHA-256"},
     km,{name:"AES-GCM",length:256},false,["encrypt"]);
   const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(objText)));
-  const b=u=>btoa(String.fromCharCode(...u));
+  const b=u=>{ let r=""; for(let i=0;i<u.length;i+=0x8000) r+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000)); return btoa(r); };   /* 큰 파일(앱) 봉인 시 스택 초과 방지 (Marc 10-29) */
   return JSON.stringify({enc:"AES-GCM",kdf:"PBKDF2-SHA256",iter:250000,
     salt:b(salt),iv:b(iv),ct:b(ct)},null,0);
 };

@@ -1620,6 +1620,42 @@ def main():
 
     # ── 7.2 슬랙 의장 보고(#one-제품디자인실) — 봇 토큰이 있으면 자동 갱신 ──
     D["sl"] = slack_reports(people, ft) or load_sealed("slack") or []
+    D["slm"] = load_sealed("slackm") or []      # 채널 멤버 메일(비공개 채널 링크는 멤버에게만, Marc 10-29)
+
+    # ── 7.3 PEL 협업 에픽 (Biz-E Product Engineering Lab) — 디자인 관련만 (Marc 10-29) ──
+    #   [PEL구현][FT/TM-x] = FT·디자인 구현, mds-playbook = 디자인 시스템, 디자인 QA·검수 = QA 자동화, 그 외 디자인 = 기타
+    #   행 = [key, kind, status, assignee, created, updated, parentKey, title]
+    try:
+        _pel = jql('project = PEL AND issuetype = Epic AND created >= "2026-04-01" AND '
+                   '(summary ~ "PEL구현" OR summary ~ "디자인" OR summary ~ "mds" OR summary ~ "Design" OR summary ~ "QA")',
+                   ["summary", "status", "assignee", "created", "updated", "parent"], cap=1500)
+        pel = []
+        for n in _pel:
+            s_ = str(F(n, "summary") or "")
+            par = str(F(n, "parent", "key") or "")
+            if "[PEL구현]" in s_:
+                kind = "impl"
+            elif re.search(r"mds|MDS", s_) or par == "TM-4912":
+                kind = "mds"
+            elif re.search(r"디자인\s?QA|디자인 검수|QA 도구", s_):
+                kind = "qa"
+            elif "디자인" in s_ or "Design" in s_ or par.startswith("FT-"):
+                kind = "etc"
+            else:
+                continue
+            t_ = re.sub(r"\[(PEL구현|mds-playbook|(FT|TM)-\d+)\]\s*", "", s_).strip()
+            who = (F(n, "assignee", "displayName") or "-").split("/")[0].strip()
+            pel.append([n["key"], kind, str(F(n, "status", "name") or ""), who, day(F(n, "created")) or "",
+                        day(F(n, "updated")) or "", par, t_])
+        pel.sort(key=lambda r: r[5], reverse=True)
+        if len(pel) >= 20:
+            D["pel"] = pel
+        else:
+            D["pel"] = (_old_data() or {}).get("pel") or []
+        print(f"PEL 디자인 협업 에픽 {len(pel)}건")
+    except Exception as _e:
+        print("PEL 건너뜀:", type(_e).__name__, _e)
+        D["pel"] = (_old_data() or {}).get("pel") or []
 
     # ── 7.5 예정 디자인 수요 (runway 분기 플래닝 스냅샷) ──
     #   runway 내부 데이터(디자인 디펜던시 팀 지정)는 Jira에 없어 스냅샷으로 봉인해 둔다(runway.enc).
