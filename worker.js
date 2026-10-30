@@ -9,7 +9,15 @@
    회사 계정 로그인(구글 OAuth):
    · /auth       POST {credential}  — 구글 ID 토큰 검증(도메인 제한) → 통과 시 복호화 키 배급 + 지표 권한 플래그
    · /kpi-allow  POST {credential[,list]} — 지표 이메일 허용목록 읽기/저장(소유자 Marc 전용)
-   · KV kpi:allow — 지표 열람 허용 이메일 배열 (없으면 소유자 1명) */
+   · KV kpi:allow — 지표 열람 허용 이메일 배열 (없으면 소유자 1명)
+
+   Design Driven(FT) 지라 편집 (Marc 10-30 — 디자이너 전원 허용):
+   · Secret JIRA_EMAIL / JIRA_TOKEN : 지라 API 계정 (Marc 가 직접 등록)
+   · /auth 가 편집 토큰(12시간, GATE_HASH 로 서명)을 함께 배급 → 대시보드 sessionStorage pxd-et
+   · /jira-edit  POST {token,key,set,add,remove} — FT 프로젝트 · 담당자/우선순위/시작일/마감일/라벨만
+   · /dd-editors POST {token[,acc]} — 편집 허용 지라 계정 목록(KV dd:editors) 읽기/저장(소유자 전용, 대시보드가 로스터로 자동 동기화)
+   · /dd-log     POST {token[,key]} — 최근 변경 기록(KV dd:log, 최근 300건)
+   · 변경마다 지라에 '대시보드에서 OOO 님이 변경' 코멘트를 남겨 실제 변경자를 기록 */
 const ORIGIN = "https://marcshin-mss.github.io";
 const KEY = "basis";
 const REPO = "marcshin-mss/design-roster";
@@ -98,6 +106,58 @@ async function allowList(env) {
   return a.map(x => String(x).toLowerCase());
 }
 
+/* ── Design Driven 편집 ─────────────────────────────────────── */
+const JIRA_BASE = "https://musinsa-oneteam.atlassian.net";
+const EDIT_TTL = 12 * 3600;
+const DD_PROJECT = "FT";
+const DD_PRI = ["Highest", "High", "Medium", "Low", "Lowest"];
+const DD_START = "customfield_10015";            /* 시작 날짜 */
+/* 봇·프로세스용 라벨은 대시보드에서 지우지 못하게 */
+const DD_LOCK = /^(one|fasttrack|fast-track-.*|conveyor.*|auto-.*|pel.*|ux-ft.*|DUE_.*|.*-bot|.*리뷰제외|standby.*|seamless-.*|track-.*|test)$/i;
+
+async function editToken(env, email) {
+  const body = btoa(JSON.stringify({ e: email, x: Math.floor(Date.now() / 1000) + EDIT_TTL })).replace(/=+$/, "");
+  return body + "." + await hmac("edit:" + env.GATE_HASH, body);
+}
+async function editTokenEmail(env, tok) {
+  try {
+    const [body, sig] = String(tok || "").split(".");
+    if (!body || !sig || !env.GATE_HASH) return "";
+    if (sig !== await hmac("edit:" + env.GATE_HASH, body)) return "";
+    const p = JSON.parse(atob(body));
+    return p.x > Math.floor(Date.now() / 1000) ? String(p.e || "").toLowerCase() : "";
+  } catch (e) { return ""; }
+}
+async function jira(env, method, path, body) {
+  const r = await fetch(JIRA_BASE + path, { method,
+    headers: { "authorization": "Basic " + btoa(env.JIRA_EMAIL + ":" + env.JIRA_TOKEN),
+               "accept": "application/json", "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text();
+  let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = null; }
+  return { ok: r.ok, status: r.status, j, t };
+}
+async function ddEditors(env) {
+  try { const a = JSON.parse((await env.ROSTER.get("dd:editors")) || "null"); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
+}
+/* 로그인 이메일 → 지라 계정. 하루 캐시 */
+async function jiraAccountOf(env, email) {
+  const ck = "dd:acc:" + email, c = await env.ROSTER.get(ck);
+  if (c) return JSON.parse(c);
+  const r = await jira(env, "GET", "/rest/api/3/user/search?query=" + encodeURIComponent(email));
+  const u = r.ok && Array.isArray(r.j) ? (r.j.find(x => String(x.emailAddress || "").toLowerCase() === email) || (r.j.length === 1 ? r.j[0] : null)) : null;
+  const v = u ? { id: u.accountId, name: String(u.displayName || "").split("/")[0].trim() } : null;
+  if (v) await env.ROSTER.put(ck, JSON.stringify(v), { expirationTtl: 86400 });
+  return v;
+}
+const ddDay = s => s == null || s === "" ? null : (/^\d{4}-\d{2}-\d{2}$/.test(String(s)) ? String(s) : undefined);
+function ddPick(f) {
+  const a = f.assignee || null;
+  return { pri: (f.priority || {}).name || "", sd: f[DD_START] || "", du: f.duedate || "",
+           labs: f.labels || [], acc: a ? a.accountId : "", asg: a ? String(a.displayName || "").split("/")[0].trim() : "" };
+}
+
 async function dispatch(env, wf) {
   const url = "https://api.github.com/repos/" + REPO + "/actions/workflows/" + wf + "/dispatches";
   return fetch(url, { method: "POST",
@@ -139,7 +199,8 @@ export default {
       const allow = await allowList(env);
       return J({ ok: true, email, key: env.GATE_PASS,
                  kpi: allow.includes(email), admin: email === OWNER,
-                 deploy: email === OWNER && env.DEPLOY_HASH ? await deployToken(env, email) : undefined }, 200, cors);
+                 deploy: email === OWNER && env.DEPLOY_HASH ? await deployToken(env, email) : undefined,
+                 edit: env.GATE_HASH ? await editToken(env, email) : undefined }, 200, cors);
     }
 
     /* ── 지표 허용목록 읽기/저장 (소유자 전용) ── */
@@ -155,6 +216,81 @@ export default {
         return J({ ok: true, list: clean }, 200, cors);
       }
       return J({ ok: true, list: await allowList(env) }, 200, cors);
+    }
+
+    /* ── Design Driven: 편집 허용 계정 목록 (소유자 전용) ── */
+    if (req.method === "POST" && path === "/dd-editors") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      const email = await editTokenEmail(env, b && b.token);
+      if (email !== OWNER) return J({ ok: false, error: "forbidden" }, 403, cors);
+      if (Array.isArray(b.acc)) {
+        const clean = [...new Set(b.acc.map(String).filter(x => /^[\w:-]{6,80}$/.test(x)))].slice(0, 200);
+        await env.ROSTER.put("dd:editors", JSON.stringify(clean));
+        return J({ ok: true, n: clean.length }, 200, cors);
+      }
+      return J({ ok: true, acc: await ddEditors(env) }, 200, cors);
+    }
+
+    /* ── Design Driven: 최근 변경 기록 ── */
+    if (req.method === "POST" && path === "/dd-log") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      if (!(await editTokenEmail(env, b && b.token))) return J({ ok: false, error: "auth" }, 403, cors);
+      let log = []; try { log = JSON.parse((await env.ROSTER.get("dd:log")) || "[]"); } catch (e) { log = []; }
+      if (b.key) log = log.filter(x => x.key === b.key);
+      return J({ ok: true, log: log.slice(0, 60) }, 200, cors);
+    }
+
+    /* ── Design Driven: 지라 직접 수정 (FT · 담당자/우선순위/진행시기/라벨) ── */
+    if (req.method === "POST" && path === "/jira-edit") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      const email = await editTokenEmail(env, b && b.token);
+      if (!email) return J({ ok: false, error: "auth" }, 403, cors);
+      if (!env.JIRA_EMAIL || !env.JIRA_TOKEN) return J({ ok: false, error: "no-jira" }, 501, cors);
+      const key = String(b.key || "").toUpperCase();
+      if (!new RegExp("^" + DD_PROJECT + "-\\d{1,6}$").test(key)) return J({ ok: false, error: "key" }, 400, cors);
+      const eds = await ddEditors(env), me = await jiraAccountOf(env, email);
+      if (email !== OWNER && !(me && eds.includes(me.id))) return J({ ok: false, error: "not-editor" }, 403, cors);
+      const FL = "project,assignee,priority,duedate,labels," + DD_START;
+      const cur = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + FL);
+      if (!cur.ok) return J({ ok: false, error: "jira-get", status: cur.status }, 502, cors);
+      if (((cur.j.fields || {}).project || {}).key !== DD_PROJECT) return J({ ok: false, error: "project" }, 403, cors);
+      const before = ddPick(cur.j.fields), set = b.set || {}, fields = {}, update = {}, ch = [];
+      if ("assignee" in set) {
+        const a = set.assignee ? String(set.assignee) : null;
+        if (a && !eds.includes(a) && a !== before.acc) return J({ ok: false, error: "assignee" }, 400, cors);
+        if (a !== (before.acc || null)) { fields.assignee = a ? { accountId: a } : null; ch.push("담당자"); }
+      }
+      if ("priority" in set) {
+        if (!DD_PRI.includes(set.priority)) return J({ ok: false, error: "priority" }, 400, cors);
+        if (set.priority !== before.pri) { fields.priority = { name: set.priority }; ch.push("우선순위 " + (before.pri || "-") + "→" + set.priority); }
+      }
+      for (const [k, f, lab] of [["start", DD_START, "시작일"], ["due", "duedate", "마감일"]]) {
+        if (!(k in set)) continue;
+        const v = ddDay(set[k]); if (v === undefined) return J({ ok: false, error: k }, 400, cors);
+        const pv = k === "start" ? before.sd : before.du;
+        if ((v || "") !== (pv || "")) { fields[f] = v; ch.push(lab + " " + (pv || "-") + "→" + (v || "-")); }
+      }
+      const okLab = l => typeof l === "string" && /^[^\s]{1,60}$/.test(l);
+      const add = (Array.isArray(b.add) ? b.add : []).filter(okLab).filter(l => !before.labs.includes(l)).slice(0, 10);
+      const rem = (Array.isArray(b.remove) ? b.remove : []).filter(okLab).filter(l => before.labs.includes(l)).slice(0, 10);
+      if (rem.some(l => DD_LOCK.test(l))) return J({ ok: false, error: "locked-label" }, 400, cors);
+      if (add.length || rem.length) { update.labels = [...add.map(l => ({ add: l })), ...rem.map(l => ({ remove: l }))];
+        ch.push("라벨" + (add.length ? " +" + add.join(" +") : "") + (rem.length ? " -" + rem.join(" -") : "")); }
+      if (!ch.length) return J({ ok: true, same: true, issue: before }, 200, cors);
+      const put = await jira(env, "PUT", "/rest/api/3/issue/" + key, { fields, update });
+      if (!put.ok) return J({ ok: false, error: "jira-put", status: put.status, detail: (put.t || "").slice(0, 300) }, 502, cors);
+      const aft = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + FL);
+      const issue = aft.ok ? ddPick(aft.j.fields) : null;
+      const who = (me && me.name) || email.split("@")[0];
+      if (ch.includes("담당자")) ch[ch.indexOf("담당자")] = "담당자 " + (before.asg || "미배정") + "→" + ((issue && issue.asg) || "미배정");
+      const line = ch.join(" · ");
+      /* 실제 변경자 기록 — 지라 이력엔 API 계정으로 남으므로 코멘트로 남긴다 */
+      await jira(env, "POST", "/rest/api/3/issue/" + key + "/comment", { body: { type: "doc", version: 1, content: [{ type: "paragraph", content: [
+        { type: "text", text: "[디자인 대시보드] " + who + " 님이 변경: " + line }] }] } }).catch(() => null);
+      let log = []; try { log = JSON.parse((await env.ROSTER.get("dd:log")) || "[]"); } catch (e) { log = []; }
+      log.unshift({ at: new Date().toISOString(), by: who, email, key, ch: line });
+      await env.ROSTER.put("dd:log", JSON.stringify(log.slice(0, 300)));
+      return J({ ok: true, issue, ch: line }, 200, cors);
     }
 
     /* ── 지금 다시 읽기 : 지라 재조회 워크플로를 깨운다 ── */

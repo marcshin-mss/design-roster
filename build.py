@@ -1602,7 +1602,9 @@ def main():
         one.append([n["key"], stg, ty, who or "-", F(n, "summary") or "",
                     ("d" if dd else "") + ("o" if dens else ""),
                     re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:2500], day(F(n, "updated")) or "", st, asg or "",
-                    [l for l in labs if l.startswith("one밀도감") or l == "design-driven"]])
+                    [l for l in labs if l.startswith("one밀도감") or l == "design-driven"],
+                    F(n, "priority", "name") or "", day(F(n, "customfield_10015")) or "", day(F(n, "duedate")) or "",   # [11] 우선순위 [12] 시작 [13] 마감
+                    labs, F(n, "assignee", "accountId") or "", rep or ""])   # [14] 라벨 전체 [15] 담당자 계정 [16] 보고자
     ft.sort(key=lambda r: (r[1], r[0]))
     one.sort(key=lambda r: r[0])
     if len(one) < 20:
@@ -1613,6 +1615,7 @@ def main():
         D["ft"] = ft
         D["one"] = one
     D["nodN"] = len(D["one"])
+    D["acc"] = {m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")}   # Design Driven 담당자 지정용
     _sc = {}
     for r in one:
         _sc[r[1]] = _sc.get(r[1], 0) + 1

@@ -838,7 +838,7 @@ function boot(dataText,basis){
       if(await tryPw(d.key)){
         try{ sessionStorage.setItem("pxd-key",d.key);
              sessionStorage.setItem("pxd-me",JSON.stringify({email:d.email,kpi:d.kpi,admin:d.admin}));
-             if(d.deploy) sessionStorage.setItem("pxd-dt",d.deploy); else sessionStorage.removeItem("pxd-dt"); }catch(e){}   /* 소유자 배포 토큰(24시간) — 미리보기 배포하기 버튼용 */
+             if(d.deploy) sessionStorage.setItem("pxd-dt",d.deploy); else sessionStorage.removeItem("pxd-dt"); if(d.edit) sessionStorage.setItem("pxd-et",d.edit); else sessionStorage.removeItem("pxd-et"); }catch(e){}   /* 소유자 배포 토큰(24시간) — 미리보기 배포하기 버튼용 */
         try{ const ret=sessionStorage.getItem("pxd-ret"); if(ret){ sessionStorage.removeItem("pxd-ret"); setTimeout(()=>{ location.hash=ret; },400); } }catch(e){}
       } else say("데이터를 여는 중 문제가 발생했습니다.");
     }catch(e){ say("로그인 중 오류가 발생했습니다."); }
