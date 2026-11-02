@@ -365,10 +365,9 @@ def compute_leave(names):
             if not is_hol or summ in HOL_BLOCK or summ == "제헌절":
                 continue
             for d in _weekdays(e.get("start", ""), e.get("end", "")):
-                if in_range(d):
+                if today - datetime.timedelta(weeks=27) <= d <= hi:   # 공휴일은 지난 26주까지(분기 초 공휴일이 가용에서 빠지지 않게, Marc 11-02)
                     hol[_wkid(d)] = hol.get(_wkid(d), 0) + 1
-                if today - datetime.timedelta(weeks=27) <= d <= hi:   # 주간 기록 기준일(금→직전 영업일) 라벨용, 지난 26주까지
-                    hold.add(d.isoformat())
+                    hold.add(d.isoformat())   # 주간 기록 기준일(금→직전 영업일) 라벨 · 페이지 가용 계산(분기 안 공휴일 날짜)
     except Exception as ex:
         print("공휴일 iCal 실패(폴백 시도):", ex)
         hol = ((load_sealed("leave") or {}).get("hol")) or {}
