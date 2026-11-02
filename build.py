@@ -2102,6 +2102,86 @@ def main():
     except Exception as _e:
         print("분기 보관 정보 건너뜀:", type(_e).__name__, _e)
 
+    # ── 론치 후 결과 · Health Check 스냅샷 (Marc 11-02 「실시간 아니어도 돼, 하루 한 번」)
+    #   지라 'QBR 공유사항'(customfield_10710) · Impact Sharing Date(19702) · Health Check(10071) 를 하루 한 번만 받아 D["imp"] 에 싣는다.
+    #   행 = [키, 제목, 상태, 해결일, 공유일, QBR 글, Health, 기한] — Worker /impact 와 같은 모양(페이지는 이게 있으면 Worker 를 부르지 않음).
+    #   지난 data.json 의 스냅샷이 오늘(한국 날짜) 것이면 그대로 이어 싣는다(그날 첫 빌드 = 평일 07시에 갱신). 실패해도 빌드는 계속.
+    try:
+        import time as _tm
+        _old = _old_data() or {}
+        _prev = _old.get("imp") if isinstance(_old, dict) else None
+        _now = int(_tm.time() * 1000)
+        _rk = re.compile(r"^[A-Z][A-Z0-9]{1,15}-\d{1,7}$")
+        _ks = set()
+        def _walk(o):   # 분기 과제·에픽·티켓 어디에 있든 지라 키면 모두 (페이지가 묻는 키 = 이니셔티브·에픽 + FT)
+            if isinstance(o, str):
+                if _rk.match(o): _ks.add(o)
+            elif isinstance(o, dict):
+                for _k, _v in o.items():
+                    if isinstance(_k, str) and _rk.match(_k): _ks.add(_k)
+                    _walk(_v)
+            elif isinstance(o, (list, tuple)):
+                for _v in o: _walk(_v)
+        _walk(D.get("pjq")); _walk(D.get("pj")); _walk(D.get("one")); _walk(D.get("ft"))
+        _ks = sorted(k for k in _ks if isinstance(k, str) and _rk.match(k))
+        _kst = lambda ms: datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600).strftime("%Y-%m-%d")
+        if _prev and _kst(int(_prev.get("at") or 0)) == _kst(_now) and not os.environ.get("IMP_FORCE"):   # 한국 날짜로 하루 한 번(그날 첫 빌드 = 평일 07시)
+            D["imp"] = _prev
+            print("론치 후 결과 스냅샷: 지난 것 유지 (%d행)" % len(_prev.get("rows") or []))
+        elif _ks and EMAIL and TOKEN:
+            def _adf(n):
+                if not n: return ""
+                if isinstance(n, str): return n
+                if n.get("type") == "text": return n.get("text") or ""
+                if n.get("type") == "hardBreak": return "\n"
+                c = "".join(_adf(x) for x in (n.get("content") or []))
+                if n.get("type") == "listItem": return "* " + c.rstrip("\n") + "\n"
+                if n.get("type") in ("paragraph", "heading"): return c + "\n"
+                return c
+            _FL = ["summary", "status", "resolutiondate", "customfield_10710", "customfield_19702", "customfield_10071", "duedate"]
+            def _one(ks):
+                out, tok = [], None
+                while True:
+                    body = {"jql": "key in (" + ",".join(ks) + ")", "maxResults": 100, "fields": _FL}
+                    if tok: body["nextPageToken"] = tok
+                    req = urllib.request.Request(BASE + "/rest/api/3/search/jql", data=json.dumps(body).encode(), headers={
+                        "Authorization": "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode(),
+                        "Content-Type": "application/json", "Accept": "application/json"})
+                    try:
+                        with urllib.request.urlopen(req, timeout=60) as r:
+                            d = json.load(r)
+                    except urllib.error.HTTPError as e:
+                        if e.code == 400: return None      # 없어진 키가 섞임 → 나눠서 다시
+                        raise
+                    out += d.get("issues", [])
+                    tok = d.get("nextPageToken")
+                    if not tok or d.get("isLast"): return out
+            def _get(ks):
+                r = _one(ks)
+                if r is not None: return r
+                if len(ks) == 1: return []
+                h = len(ks) // 2
+                return _get(ks[:h]) + _get(ks[h:])
+            _rows = []
+            for i in range(0, len(_ks), 100):
+                for x in _get(_ks[i:i + 100]):
+                    f = x.get("fields") or {}
+                    q = f.get("customfield_10710")
+                    _rows.append([x.get("key"), f.get("summary") or "", (f.get("status") or {}).get("name") or "",
+                                  str(f.get("resolutiondate") or "")[:10], str(f.get("customfield_19702") or "")[:10],
+                                  None if q is None else (q if isinstance(q, str) else _adf(q)),
+                                  str((f.get("customfield_10071") or {}).get("value") or ""), str(f.get("duedate") or "")[:10]])
+            D["imp"] = {"at": _now, "rows": _rows}
+            print("론치 후 결과 스냅샷: 새로 받음 (키 %d · 행 %d · QBR %d)" % (len(_ks), len(_rows), sum(1 for r in _rows if r[5])))
+        elif _prev:
+            D["imp"] = _prev
+    except Exception as _e:
+        print("론치 후 결과 스냅샷 건너뜀:", type(_e).__name__, _e)
+        try:
+            if _prev: D["imp"] = _prev
+        except Exception:
+            pass
+
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     out = os.path.join(HERE, "data.json")
