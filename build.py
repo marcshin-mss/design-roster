@@ -662,7 +662,8 @@ def main():
     FLD = ["summary", "status", "issuetype", "parent", "assignee", "reporter",
            "created", "resolutiondate", "labels", "project", "updated", "description", "priority", "duedate",
            "customfield_10015",   # 시작 날짜
-           "customfield_12766"]   # Estimate MD — 대시보드 분기 크기가 없을 때 크기로 씀 (Marc 11-03)
+           "customfield_12766",   # Estimate MD — 대시보드 분기 크기가 없을 때 크기로 씀 (Marc 11-03)
+           "statuscategorychangedate"]   # 상태 범주가 바뀐 날 — 진행 중 티켓의 '진행 시작일'(시작 날짜를 안 넣어도 됨, Marc 11-03)
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
     # 7월 티켓 기준: 7/1 이후 생성분 전부 + 7/1 이전 생성이라도 (LEAD 이후 생성 & 진행 중, HOLD 제외)
@@ -1430,7 +1431,8 @@ def main():
                 _pjx[_n["key"]] = _desc(_n)
                 _pjt.setdefault(_root, []).append([_n["key"], F(_n, "summary") or "", _st, _who, _ep or "", _sn, _rs,
                                                    day(F(_n, "customfield_10015")) or "", day(F(_n, "duedate")) or "", _cr,
-                                                   (F(_n, "customfield_12766") if isinstance(F(_n, "customfield_12766"), (int, float)) else "")])   # [9] 생성일 [10] Estimate MD
+                                                   (F(_n, "customfield_12766") if isinstance(F(_n, "customfield_12766"), (int, float)) else ""),
+                                                   day(F(_n, "statuscategorychangedate")) or ""])   # [9] 생성일 [10] Estimate MD [11] 상태 범주 바뀐 날(진행 중이면 진행 시작일)
 
             def _info(k, fb=None):
                 _m = meta.get(k, {})
