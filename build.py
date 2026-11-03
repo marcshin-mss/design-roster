@@ -2185,6 +2185,60 @@ def main():
         except Exception:
             pass
 
+    # ── 조직 전체 론치 성과 (Marc 11-03 「Runway 위클리 — 모든 조직 과제, 29CM·다른 조직 포함, 자동 업데이트」)
+    #   Runway 그룹 위클리(MSS·29CM·CBP·PBO·DI·EF·Security)는 지라 필터 → 같은 원천을 지라에서 직접 읽는다(Runway 로그인 불필요).
+    #   대상 = 지난 분기 시작 이후 론치완료·배포완료 이니셔티브(회사 전체). 행 = [키, 제목, 상태, 해결일, 공유일, QBR 공유사항, Weekly 공유사항, Group, Sub Group, 담당, 라벨]
+    #   하루 한 번(한국 날짜) — D.imp 와 같은 규칙. 실패하면 지난 값 유지.
+    _wprev = None
+    try:
+        import time as _tm2
+        _old2 = _old_data() or {}
+        _wprev = _old2.get("wko") if isinstance(_old2, dict) else None
+        _now2 = int(_tm2.time() * 1000)
+        _kst2 = lambda ms: datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600).strftime("%Y-%m-%d")
+        if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE"):
+            D["wko"] = _wprev
+            print("조직 전체 론치 성과: 지난 것 유지 (%d행)" % len(_wprev.get("rows") or []))
+        elif EMAIL and TOKEN:
+            _t = datetime.datetime.utcfromtimestamp(_now2 / 1000 + 9 * 3600)
+            _qm = ((_t.month - 1) // 3) * 3 + 1
+            _py, _pm = (_t.year, _qm - 3) if _qm > 3 else (_t.year - 1, _qm + 9)
+            _from = "%04d-%02d-01" % (_py, _pm)
+            def _adf2(n):
+                if not n: return ""
+                if isinstance(n, str): return n
+                if n.get("type") == "text": return n.get("text") or ""
+                if n.get("type") == "hardBreak": return "\n"
+                c = "".join(_adf2(x) for x in (n.get("content") or []))
+                if n.get("type") == "listItem": return "* " + c.rstrip("\n") + "\n"
+                if n.get("type") in ("paragraph", "heading"): return c + "\n"
+                return c
+            _mv = lambda v: ", ".join(str((x or {}).get("value") or "") for x in (v or []) if isinstance(x, dict))
+            _fl = ["summary", "status", "resolutiondate", "customfield_10710", "customfield_19702", "customfield_10625",
+                   "customfield_10627", "customfield_10620", "assignee", "labels"]
+            _q = ('issuetype = Initiative AND status in (론치완료, 배포완료) AND (resolved >= "%s" OR "Impact Sharing Date[Date]" >= "%s") '
+                  'ORDER BY resolved DESC' % (_from, _from))
+            _wr = []
+            for x in jql(_q, _fl, cap=3000):
+                f = x.get("fields") or {}
+                qb = f.get("customfield_10710"); wk = f.get("customfield_10625")
+                qb = "" if qb is None else (qb if isinstance(qb, str) else _adf2(qb))
+                wk = "" if wk is None else (wk if isinstance(wk, str) else _adf2(wk))
+                _wr.append([x.get("key"), f.get("summary") or "", (f.get("status") or {}).get("name") or "",
+                            str(f.get("resolutiondate") or "")[:10], str(f.get("customfield_19702") or "")[:10],
+                            qb.strip()[:2500], wk.strip()[:1500], _mv(f.get("customfield_10627")), _mv(f.get("customfield_10620")),
+                            (f.get("assignee") or {}).get("displayName") or "", ",".join(f.get("labels") or [])[:300]])
+            D["wko"] = {"at": _now2, "from": _from, "rows": _wr}
+            print("조직 전체 론치 성과: 새로 받음 (%s 이후 %d행 · QBR %d · Weekly %d)" % (_from, len(_wr), sum(1 for r in _wr if r[5]), sum(1 for r in _wr if r[6])))
+        elif _wprev:
+            D["wko"] = _wprev
+    except Exception as _e:
+        print("조직 전체 론치 성과 건너뜀:", type(_e).__name__, _e)
+        try:
+            if _wprev: D["wko"] = _wprev
+        except Exception:
+            pass
+
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     out = os.path.join(HERE, "data.json")
