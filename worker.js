@@ -860,4 +860,4 @@ export default {
   },
 };
 
-// deploy-worker 첫 배포 2026-11-04
+// deploy-worker 첫 배포 2026-11-04 (시크릿 등록 후)
