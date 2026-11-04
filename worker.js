@@ -859,3 +859,5 @@ export default {
     return J({ error: "method" }, 405, cors);
   },
 };
+
+// deploy-worker 첫 배포 2026-11-04
