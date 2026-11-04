@@ -564,6 +564,62 @@ def _old_data():
     return d
 
 
+_RW_DT = {"biz_p_commerce_design": "Commerce Design", "biz_p_core_ux_design": "Core UX Design",
+          "biz_p_discovery_design": "Discovery Design", "biz_p_engagement_design": "Engagement Design"}
+_RW_JIRA = None
+def runway_from_jira():
+    """Runway 분기 플래닝 보드를 지라 라벨로 다시 만든다 (Marc 11-04 「로그인 연결 없이」).
+    Runway 가 이니셔티브에 붙이는 라벨: runway-YYYY_qN_플래닝(보드) · runway-YYYY_qN_플래닝-<팀>-atl|btl(팀별 계획선).
+    11-04 대조: 4Q 보드 디자인 4팀 187건 전부 Runway 화면과 일치. 우선순위 = 지라 우선순위, 예상 시작 · 종료 = 지라 시작일 · 기한."""
+    global _RW_JIRA
+    if _RW_JIRA is not None:
+        return _RW_JIRA
+    _RW_JIRA = {}
+    try:
+        now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+        cq = (now.month - 1) // 3 + 1
+        qs = [(now.year, cq), (now.year - 1, 4) if cq == 1 else (now.year, cq - 1)]
+        by, plan, boards = {}, {}, {}
+        for (y, n) in sorted(qs):
+            lab, base = "%d-Q%d" % (y, n), "runway-%d_q%d_플래닝" % (y, n)
+            iss = jql('labels = "%s"' % base, ["summary", "status", "priority", "assignee", "labels", "customfield_10015", "duedate"])
+            if not iss:
+                continue
+            boards[lab] = "jira:" + base
+            atl, btl, rows = [], [], []
+            for it in iss:
+                ls = F(it, "labels") or []
+                tl = [l[len(base) + 1:] for l in ls if l.startswith(base + "-")]
+                if any(x.endswith("-atl") for x in tl):
+                    atl.append(it["key"])
+                if any(x.endswith("-btl") for x in tl):
+                    btl.append(it["key"])
+                dt = [(_RW_DT[x[:-4]], x.endswith("-btl")) for x in tl if x[:-4] in _RW_DT]
+                if not dt:
+                    continue
+                qq = set()
+                for l in ls:
+                    m = re.match(r"runway-(\d{4})_q(\d)_플래닝$", l) or re.match(r"Y(\d{2})Q(\d)$", l)
+                    if m:
+                        yy = int(m.group(1)); yy = yy + 2000 if yy < 100 else yy
+                        qq.add("%d-Q%s" % (yy, m.group(2)))
+                rows.append({"k": it["key"], "n": F(it, "summary") or "", "st": F(it, "status", "name") or "",
+                             "sc": F(it, "status", "statusCategory", "key") or "", "pri": F(it, "priority", "name") or "",
+                             "q": ",".join(sorted(qq)), "t": [t for t, _ in dt], "btl": 1 if any(b for _, b in dt) else 0,
+                             "as": (F(it, "assignee", "displayName") or "").split("/")[0].strip(),
+                             "s": F(it, "customfield_10015") or "", "e": F(it, "duedate") or ""})
+            by[lab], plan[lab] = rows, {"atl": atl, "btl": btl}
+        cur = "%d-Q%d" % (now.year, cq)
+        if by.get(cur):
+            _RW_JIRA = {"asof": now.strftime("%Y-%m-%d"), "src": "jira labels " + boards.get(cur, ""), "rows": by[cur],
+                        "by": by, "boards": boards, "plan": plan}
+            print("runway(지라 라벨) %s" % ", ".join("%s %d건" % (k, len(v)) for k, v in sorted(by.items())))
+    except Exception as _e:
+        print("runway(지라 라벨) 건너뜀:", type(_e).__name__)
+        _RW_JIRA = {}
+    return _RW_JIRA
+
+
 _RW_LIVE = None
 def runway_live(base):
     """Runway 보드 최신 스냅샷(예약 · 수동 싱크가 Worker 에 올림, Marc 11-04)으로 rows · by · boards · plan · asof 를 바꾼다.
@@ -581,6 +637,11 @@ def runway_live(base):
             print("runway 최신 스냅샷 건너뜀:", type(_e).__name__)
             _RW_LIVE = {}
     s = _RW_LIVE
+    _j = runway_from_jira()                 # 지라 라벨이 기본(매 빌드 최신) — 실패하면 Worker 스냅샷 · runway.enc
+    if _j.get("rows"):
+        for k in ("asof", "src", "rows", "by", "boards", "plan"):
+            base[k] = _j[k]
+        return base
     if s.get("rows") and str(s.get("asof", "")) >= str(base.get("asof", "")):
         for k in ("asof", "src", "rows", "by", "boards", "plan"):
             if k in s:
