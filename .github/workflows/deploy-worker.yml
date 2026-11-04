@@ -28,11 +28,18 @@ jobs:
       - name: 워커 코드 올리기
         run: |
           if [ -z "$CF_API_TOKEN" ]; then echo "::warning::CF_API_TOKEN 시크릿이 없어 워커 배포를 건너뜁니다"; exit 0; fi
+          # 붙여 넣을 때 섞인 공백 · 줄바꿈 · 'Authorization: Bearer' 문구는 걷어 낸다
+          T=$(printf '%s' "$CF_API_TOKEN" | tr -d '\r' | sed -n 's/.*Bearer[[:space:]]*\([^[:space:]"]*\).*/\1/p' | head -1)
+          [ -n "$T" ] || T=$(printf '%s' "$CF_API_TOKEN" | tr -d '[:space:]')
+          echo "::add-mask::$T"
+          echo "토큰 길이 ${#T}"
+          curl -sS "https://api.cloudflare.com/client/v4/user/tokens/verify" -H "Authorization: Bearer $T" > /tmp/r0.json
+          python3 -c "import json;j=json.load(open('/tmp/r0.json'));print('verify:', (j.get('result') or {}).get('status') if j.get('success') else j.get('errors'))"
           cp worker.js /tmp/w.mjs && node --check /tmp/w.mjs
-          curl -sS -X PUT "$API/content" -H "Authorization: Bearer $CF_API_TOKEN" \
+          curl -sS -X PUT "$API/content" -H "Authorization: Bearer $T" \
             -F 'metadata={"main_module":"worker.js"};type=application/json' \
             -F 'worker.js=@worker.js;type=application/javascript+module' > /tmp/r1.json
           python3 -c "import json,sys;j=json.load(open('/tmp/r1.json'));print('content:', 'ok' if j.get('success') else j.get('errors'));sys.exit(0 if j.get('success') else 1)"
-          curl -sS -X PUT "$API/schedules" -H "Authorization: Bearer $CF_API_TOKEN" -H 'content-type: application/json' \
+          curl -sS -X PUT "$API/schedules" -H "Authorization: Bearer $T" -H 'content-type: application/json' \
             -d '[{"cron":"*/5 0-11 * * 1-5"}]' > /tmp/r2.json
           python3 -c "import json,sys;j=json.load(open('/tmp/r2.json'));print('schedules:', 'ok' if j.get('success') else j.get('errors'));sys.exit(0 if j.get('success') else 1)"
