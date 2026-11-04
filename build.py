@@ -564,6 +564,30 @@ def _old_data():
     return d
 
 
+_RW_LIVE = None
+def runway_live(base):
+    """Runway 보드 최신 스냅샷(예약 · 수동 싱크가 Worker 에 올림, Marc 11-04)으로 rows · by · boards · plan · asof 를 바꾼다.
+    팀장 배정판(lead) 등 나머지는 runway.enc 그대로. Worker 가 없거나 더 오래된 스냅샷이면 runway.enc 를 쓴다."""
+    global _RW_LIVE
+    base = dict(base or {})
+    if _RW_LIVE is None:
+        _RW_LIVE = {}
+        try:
+            if GATE:
+                rq = urllib.request.Request(SYNC_URL.rstrip("/") + "/rw-snap", headers={
+                    "x-gate": hashlib.sha256(GATE.encode()).hexdigest(), "User-Agent": "Mozilla/5.0 design-roster-build"})
+                _RW_LIVE = json.loads(urllib.request.urlopen(rq, timeout=20).read().decode() or "null") or {}
+        except Exception as _e:
+            print("runway 최신 스냅샷 건너뜀:", type(_e).__name__)
+            _RW_LIVE = {}
+    s = _RW_LIVE
+    if s.get("rows") and str(s.get("asof", "")) >= str(base.get("asof", "")):
+        for k in ("asof", "src", "rows", "by", "boards", "plan"):
+            if k in s:
+                base[k] = s[k]
+    return base
+
+
 def load_sealed(name):
     """name.enc(암호화) 우선, 없으면 name.json(평문). 둘 다 없으면 None."""
     p = os.path.join(HERE, name + ".enc")
@@ -1206,7 +1230,11 @@ def main():
                 if d.get("bucket") or tname == BUCKET:
                     x["bkt"] = 1
                 if d.get("own"):
-                    x["own"] = 1
+                    # 팀장 오너 에픽 이름의 과제에 팀원 티켓이 붙은 경우는 팀원에겐 일반 과제(이루나 · 손효정 중복 칩, Marc 11-04)
+                    if m.get("lead") or who == t.get("lead"):
+                        x["own"] = 1
+                    else:
+                        x["b"] = [b for b in (x.get("b") or []) if b != "오너"]
                 tasks.append(x)
             # 정렬 티어: 일반(0) → 디자인QA 버킷(1) → FT(2). (화면 app.json 이 사이즈 큰 순으로 재정렬)
             tasks.sort(key=lambda z: (1 if z.get("bkt") else (2 if "FT" in (z.get("b") or []) else 0),
@@ -1342,7 +1370,7 @@ def main():
         _BIZD = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design", "Product Design"}
         _rwd, _rwas = {}, ""
         try:
-            _rwd = load_sealed("runway") or {}
+            _rwd = runway_live(load_sealed("runway") or {})
             _rwas = _rwd.get("asof", "")
         except Exception as _e:
             print("runway 스냅샷 읽기 건너뜀:", type(_e).__name__)
@@ -1666,7 +1694,7 @@ def main():
     # ── 7.5 예정 디자인 수요 (runway 분기 플래닝 스냅샷) ──
     #   runway 내부 데이터(디자인 디펜던시 팀 지정)는 Jira에 없어 스냅샷으로 봉인해 둔다(runway.enc).
     #   Biz-P 디자인 4팀이 메인/디펜던시로 붙은 이니셔티브만 남긴다(타 조직 디자인팀 제외).
-    _rw = load_sealed("runway") or {}
+    _rw = runway_live(load_sealed("runway") or {})
     BIZ_DESIGN = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design"}
     _rwr = []
     for r in (_rw.get("rows") or []):
