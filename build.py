@@ -2285,7 +2285,7 @@ def main():
         _wprev = _old2.get("wko") if isinstance(_old2, dict) else None
         _now2 = int(_tm2.time() * 1000)
         _kst2 = lambda ms: datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600).strftime("%Y-%m-%d")
-        if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE"):
+        if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE") and all(len(r) > 11 for r in (_wprev.get("rows") or [])):
             D["wko"] = _wprev
             print("조직 전체 론치 성과: 지난 것 유지 (%d행)" % len(_wprev.get("rows") or []))
         elif EMAIL and TOKEN:
@@ -2317,6 +2317,23 @@ def main():
                             str(f.get("resolutiondate") or "")[:10], str(f.get("customfield_19702") or "")[:10],
                             qb.strip()[:2500], wk.strip()[:1500], _mv(f.get("customfield_10627")), _mv(f.get("customfield_10620")),
                             (f.get("assignee") or {}).get("displayName") or "", ",".join(f.get("labels") or [])[:300]])
+            # r[11] = 이니셔티브 바로 아래 에픽 담당(디자인 에픽 포함) — 지난 분기 론치처럼 디자인 티켓이 분기 데이터에 없을 때
+            #   페이지가 디자인 조직 명단과 맞춰 디자인 담당으로 쓴다 (Marc 11-05 「부티크 전체 브랜드 별도 섹션 디자이너 미기록 → 이현규님」)
+            try:
+                _dm = {}
+                _ks = [r[0] for r in _wr if r[0]]
+                for _i in range(0, len(_ks), 80):
+                    for y in jql("parent in (%s) AND issuetype = Epic" % ",".join(_ks[_i:_i + 80]), ["assignee", "parent"], cap=4000):
+                        _pk = F(y, "parent", "key"); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        if _pk and _nm:
+                            _L = _dm.setdefault(_pk, [])
+                            if _nm not in _L: _L.append(_nm)
+                for r in _wr: r.append(",".join(_dm.get(r[0], []))[:300])
+                print("론치 에픽 담당: %d건에 담당 기록" % sum(1 for r in _wr if r[11]))
+            except Exception as _e:
+                print("론치 에픽 담당 건너뜀:", type(_e).__name__)
+                for r in _wr:
+                    if len(r) < 12: r.append("")
             D["wko"] = {"at": _now2, "from": _from, "rows": _wr}
             print("조직 전체 론치 성과: 새로 받음 (%s 이후 %d행 · QBR %d · Weekly %d)" % (_from, len(_wr), sum(1 for r in _wr if r[5]), sum(1 for r in _wr if r[6])))
         elif _wprev:
