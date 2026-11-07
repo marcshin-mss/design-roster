@@ -13,3 +13,6 @@ runway.json
 pxd-*
 leave.json
 slackm.json
+
+# 지라 이력 스냅샷 원본(평문) — build.py 가 data.json 에 봉인하고 지움
+jira-snap.json

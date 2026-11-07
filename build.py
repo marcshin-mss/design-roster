@@ -2345,6 +2345,29 @@ def main():
         except Exception:
             pass
 
+    # ── 지라 이력 스냅샷 (Marc 11-07 「AI 생산성은 왜 아무것도 안나와?」)
+    #   Worker 의 지라 계정이 PD · M29CMPROD · PEL · TL · FT 를 못 보게 되어 /dlt · /pel · /launch · /ft-lt 가 0건 →
+    #   같은 계산(worker.js 함수 그대로, jira-snap.mjs)을 이 갱신 작업의 지라 계정으로 돌려 D["wj"] 에 넣는다.
+    #   페이지는 Worker 결과가 비면 이걸 쓴다. 평문 jira-snap.json 은 읽은 뒤 지운다(공개 배포물에 남지 않게).
+    _sp = os.path.join(HERE, "jira-snap.json")
+    try:
+        if EMAIL and TOKEN:
+            import subprocess
+            subprocess.run(["node", os.path.join(HERE, "jira-snap.mjs")], cwd=HERE, timeout=900, check=False)
+        _wj = json.load(open(_sp, encoding="utf-8")) if os.path.exists(_sp) else None
+        if isinstance(_wj, dict) and any(_wj.get(k) for k in ("dlt", "pel", "tl", "ftlt")):
+            D["wj"] = _wj
+        else:
+            _ow = (_old_data() or {}).get("wj") if isinstance(_old_data(), dict) else None
+            if _ow: D["wj"] = _ow; print("지라 이력 스냅샷: 지난 것 유지")
+    except Exception as _e:
+        print("지라 이력 스냅샷 건너뜀:", type(_e).__name__, _e)
+    finally:
+        try:
+            if os.path.exists(_sp): os.remove(_sp)
+        except Exception:
+            pass
+
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     out = os.path.join(HERE, "data.json")
