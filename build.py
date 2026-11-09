@@ -2345,6 +2345,49 @@ def main():
         except Exception:
             pass
 
+    # ── 릴리즈노트 원천(TL) — 시안 썸네일 · 피그마 (Marc 11-09 「릴리즈노트 … 피그마링크도 있어서 좋은 것 같아서 대시보드에도 · 시안 썸네일도」)
+    #   release.lab.musinsa.io 릴리즈노트는 pmo-bot 이 지라 TL 티켓(설명 · 첨부)으로 자동 생성 → 원천인 TL 을 직접 읽는다(로그인 불필요).
+    #   이미지는 저장하지 않고 첨부 id 만 넣는다 — 페이지가 지라 썸네일 주소로 바로 보여 준다(지라 로그인한 사람만 보임).
+    try:
+        if EMAIL and TOKEN:
+            _rx = {}
+            _fre = re.compile(r'https://(?:www\.)?figma\.com/(?:design|file|proto|board|make|slides)/[^\s"\'\\)\]<>|]+')
+            for x in jql('project = TL AND duedate >= "2026-06-01"', ["attachment", "issuelinks", "description"], cap=3000):
+                f = x.get("fields") or {}
+                ks = sorted({(l.get("outwardIssue") or l.get("inwardIssue") or {}).get("key") for l in (f.get("issuelinks") or [])} - {None})
+                fg = []
+                for u in _fre.findall(json.dumps(f.get("description") or "", ensure_ascii=False)):
+                    u = u.rstrip(".,")
+                    if u not in fg: fg.append(u)
+                im = [[int(a.get("id")), (a.get("filename") or "")[:80]] for a in sorted(f.get("attachment") or [], key=lambda a: a.get("created") or "")
+                      if str(a.get("mimeType") or "").startswith("image/")][:4]
+                if fg or im:
+                    _rx[x.get("key")] = {"ks": ks, "fg": fg[:3], "im": im}
+            # 피그마는 대개 TL 이 아니라 연결된 이니셔티브(TM · FT) 설명에 있음 — 론치 성과 키 + TL 연결 키의 설명에서도 뽑는다
+            _kf = {}
+            try:
+                _K = sorted({r[0] for r in ((D.get("wko") or {}).get("rows") or []) if r and r[0]} | {k for v in _rx.values() for k in v["ks"]})
+                for _i in range(0, len(_K), 80):
+                    try: _ys = jql("key in (%s)" % ",".join(_K[_i:_i + 80]), ["description"], cap=200)
+                    except Exception: _ys = []
+                    for y in _ys:
+                        L = []
+                        for u in _fre.findall(json.dumps((y.get("fields") or {}).get("description") or "", ensure_ascii=False)):
+                            u = u.rstrip(".,")
+                            if u not in L: L.append(u)
+                        if L: _kf[y.get("key")] = L[:3]
+            except Exception as _e2:
+                print("이니셔티브 피그마 건너뜀:", type(_e2).__name__)
+            D["rnx"] = {"at": int(datetime.datetime.utcnow().timestamp() * 1000), "tl": _rx, "kf": _kf}
+            print("릴리즈노트 원천(TL): 시안 · 피그마 %d건 (피그마 %d · 이미지 %d) · 이니셔티브 피그마 %d건" % (len(_rx), sum(1 for v in _rx.values() if v["fg"]), sum(1 for v in _rx.values() if v["im"]), len(_kf)))
+    except Exception as _e:
+        print("릴리즈노트 원천 건너뜀:", type(_e).__name__, _e)
+        try:
+            _orx = (_old_data() or {}).get("rnx")
+            if _orx: D["rnx"] = _orx
+        except Exception:
+            pass
+
     # ── 지라 이력 스냅샷 (Marc 11-07 「AI 생산성은 왜 아무것도 안나와?」)
     #   Worker 의 지라 계정이 PD · M29CMPROD · PEL · TL · FT 를 못 보게 되어 /dlt · /pel · /launch · /ft-lt 가 0건 →
     #   같은 계산(worker.js 함수 그대로, jira-snap.mjs)을 이 갱신 작업의 지라 계정으로 돌려 D["wj"] 에 넣는다.
