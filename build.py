@@ -2388,6 +2388,44 @@ def main():
         except Exception:
             pass
 
+    # ── 시안 썸네일 자체 보관 (Marc 11-10 「여전히 썸네일 안보여」)
+    #   지라 썸네일 주소는 그 브라우저가 지라에 로그인돼 있고 외부 쿠키를 허용해야만 보임 →
+    #   TL 마다 첫 이미지를 지라 API 로 받아 작은 JPEG(최대 200px)로 줄여 thumbs.enc(GATE_PASS 로 봉인)에 담는다.
+    #   지난 thumbs.enc 를 캐시로 쓰고 새 첨부만 받는다. 봉인 키가 없으면 평문으로 남기지 않게 건너뜀(공개 리포).
+    try:
+        if EMAIL and TOKEN and GATE and D.get("rnx"):
+            import io
+            from PIL import Image
+            _old = load_sealed("thumbs") or {}
+            _ids = []
+            for _v in (D["rnx"].get("tl") or {}).values():
+                for _a in (_v.get("im") or [])[:1]:
+                    if str(_a[0]) not in _ids: _ids.append(str(_a[0]))
+            _th, _new, _fail = {}, 0, 0
+            _auth = "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode()
+            for _id in _ids:
+                if _id in _old:
+                    _th[_id] = _old[_id]; continue
+                if _new >= 400: break
+                try:
+                    _rq = urllib.request.Request(BASE + "/rest/api/3/attachment/thumbnail/" + _id + "?redirect=false", headers={"Authorization": _auth, "Accept": "application/json, image/*"})
+                    with urllib.request.urlopen(_rq, timeout=30) as _r:
+                        _ct = _r.headers.get("Content-Type", ""); _raw = _r.read()
+                    if "json" in _ct:   # 미디어 서버 주소를 돌려줌 → 그 주소로 받음
+                        _u = json.loads(_raw.decode()).get("url") or ""
+                        with urllib.request.urlopen(urllib.request.Request(_u), timeout=30) as _r2:
+                            _raw = _r2.read()
+                    _im = Image.open(io.BytesIO(_raw)); _im = _im.convert("RGB"); _im.thumbnail((200, 200))
+                    _b = io.BytesIO(); _im.save(_b, "JPEG", quality=70, optimize=True)
+                    _th[_id] = "data:image/jpeg;base64," + base64.b64encode(_b.getvalue()).decode(); _new += 1
+                except Exception as _e3:
+                    _fail += 1
+                    if _fail <= 3: print("  썸네일 받기 실패:", _id, type(_e3).__name__, _e3)
+            save_sealed("thumbs", _th)
+            print("시안 썸네일: %d장 (새로 받음 %d · 실패 %d · 약 %dKB)" % (len(_th), _new, _fail, sum(len(v) for v in _th.values()) // 1024))
+    except Exception as _e:
+        print("시안 썸네일 건너뜀:", type(_e).__name__, _e)
+
     # ── 지라 이력 스냅샷 (Marc 11-07 「AI 생산성은 왜 아무것도 안나와?」)
     #   Worker 의 지라 계정이 PD · M29CMPROD · PEL · TL · FT 를 못 보게 되어 /dlt · /pel · /launch · /ft-lt 가 0건 →
     #   같은 계산(worker.js 함수 그대로, jira-snap.mjs)을 이 갱신 작업의 지라 계정으로 돌려 D["wj"] 에 넣는다.

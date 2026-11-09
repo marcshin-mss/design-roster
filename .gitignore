@@ -16,3 +16,6 @@ slackm.json
 
 # 지라 이력 스냅샷 원본(평문) — build.py 가 data.json 에 봉인하고 지움
 jira-snap.json
+
+# 시안 썸네일 평문(봉인 키 없을 때) — 커밋 금지
+thumbs.json

@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install cryptography
+      - run: pip install cryptography pillow
       - name: 주간 스냅샷 판단 (금 20시 KST)
         run: |
           KD=$(TZ=Asia/Seoul date +%u)   # 1=월 … 7=일
@@ -50,7 +50,7 @@ jobs:
         run: |
           git config user.name  "roster-bot"
           git config user.email "roster-bot@users.noreply.github.com"
-          git add -A data.json taxonomy.enc basis.enc slack.enc one.enc app.enc
+          git add -A data.json taxonomy.enc basis.enc slack.enc one.enc app.enc thumbs.enc
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 생략"
           else
