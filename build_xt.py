@@ -16,6 +16,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build
 
+def init_org(D):
+    """과제(이니셔티브)를 맡은 PM 의 소속 — 리소스 관리 「조직별 투입」용 (Marc 11-12).
+    지라 담당자 표시 이름 '이름/Core-P Partner Growth 아이디' 의 가운데 소속. 담당자가 없으면 Runway 라벨 core_p_<팀>."""
+    import re
+    keys = sorted({k for P in (D.get("pjq") or {}).values() for k in ((P or {}).get("init") or {})})
+    out = {}
+    for i in range(0, len(keys), 80):
+        ch = keys[i:i + 80]
+        try:
+            rows = build.jql("key in (%s)" % ",".join(ch), ["assignee", "labels"], cap=200)
+        except Exception as e:
+            print("  과제 소속 조회 실패:", e); continue
+        for n in rows:
+            k = n.get("key"); nm = build.F(n, "fields", "assignee", "displayName") or ""
+            m = re.match(r"^[^/]+/(.+?)\s+\S+$", nm)
+            org = m.group(1).strip() if m else ""
+            if not org:
+                lb = [re.sub(r"^runway-\d{4}_q\d_플래닝-core_p_|-atl$", "", x) for x in (build.F(n, "fields", "labels") or []) if re.search(r"-core_p_(?!product_design)\w+-atl$", x)]
+                if lb: org = "Core-P " + lb[0].replace("_", " ").title()
+            if k and org: out[k] = org
+    return out
+
 def main():
     if not (build.EMAIL and build.TOKEN):
         print("업무 현황 전용 팀: 지라 계정 없음 — 건너뜀"); return
@@ -38,7 +60,8 @@ def main():
         names = {x["t"] for t in D["teams"] for m in t["members"] for x in m.get("tasks", [])} | \
                 {r[5] for t in D["teams"] for m in t["members"] for r in m.get("dn", []) if len(r) > 5 and r[5]}
         bt = {k: v for k, v in ((D.get("basis") or {}).get("tasks") or {}).items() if k in names}
-        out = {"teams": D["teams"], "pjq": D.get("pjq") or {}, "tkm": D.get("tkm") or {}, "acc": D.get("acc") or {},
+        iorg = init_org(D)
+        out = {"teams": D["teams"], "pjq": D.get("pjq") or {}, "tkm": D.get("tkm") or {}, "acc": D.get("acc") or {}, "iorg": iorg,
                "perwho": D.get("perwho") or [], "orphan": D.get("orphan") or [],
                "rwq": (D.get("rwq") or {}).get("rows") or [], "bt": bt, "asof": D.get("asof", ""),
                "view": xt.get("view") or []}

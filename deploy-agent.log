@@ -5651,3 +5651,28 @@ branch 'main' set up to track 'origin/main'.
 완료: app
 이제 커밋하시면 됩니다. 평문은 리포에 남지 않습니다.
 ▸ 푸시
+To https://github.com/marcshin-mss/design-roster.git
+   b20b209..d548799  main -> main
+branch 'main' set up to track 'origin/main'.
+
+✓ 끝났습니다. 1~2분 뒤 자동으로 배포됩니다.
+  https://marcshin-mss.github.io/design-roster/
+  진행 상황: https://github.com/marcshin-mss/design-roster/actions
+■ 자동배포 종료 2026-11-12 18:38:11
+──────────────────────────────────────────
+▶ 자동배포 시작 2026-11-12 18:55:53
+▸ 봉인
+  (키체인에 저장된 GATE_PASS 사용)
+  건너뜀 — taxonomy.json 없음
+  건너뜀 — basis.json 없음
+  건너뜀 — slack.json 없음
+  건너뜀 — slackm.json 없음
+  건너뜀 — one.json 없음
+  app.json → app.enc  (평문 삭제)
+  건너뜀 — runway.json 없음
+  건너뜀 — leave.json 없음
+  건너뜀 — xteam.json 없음
+
+완료: app
+이제 커밋하시면 됩니다. 평문은 리포에 남지 않습니다.
+▸ 푸시
