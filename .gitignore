@@ -19,3 +19,7 @@ jira-snap.json
 
 # 시안 썸네일 평문(봉인 키 없을 때) — 커밋 금지
 thumbs.json
+
+# 업무 현황 전용 팀 명단(평문 → seal.py 로 xteam.enc) · 빌드 중간 결과(build.py 가 읽고 지움)
+xteam.json
+xt.json

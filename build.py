@@ -566,6 +566,7 @@ def _old_data():
 
 _RW_DT = {"biz_p_commerce_design": "Commerce Design", "biz_p_core_ux_design": "Core UX Design",
           "biz_p_discovery_design": "Discovery Design", "biz_p_engagement_design": "Engagement Design"}
+_RW_KEEP = None   # 업무 현황 전용 팀 계산(build_xt.py)일 때 그 팀만 남긴다
 _RW_JIRA = None
 def runway_from_jira():
     """Runway 분기 플래닝 보드를 지라 라벨로 다시 만든다 (Marc 11-04 「로그인 연결 없이」).
@@ -1429,6 +1430,7 @@ def main():
             return str(F(meta.get(k, {}), "issuetype", "name") or "")
 
         _BIZD = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design", "Product Design"}
+        if _RW_KEEP: _BIZD = set(_RW_KEEP)
         _rwd, _rwas = {}, ""
         try:
             _rwd = runway_live(load_sealed("runway") or {})
@@ -1757,6 +1759,7 @@ def main():
     #   Biz-P 디자인 4팀이 메인/디펜던시로 붙은 이니셔티브만 남긴다(타 조직 디자인팀 제외).
     _rw = runway_live(load_sealed("runway") or {})
     BIZ_DESIGN = {"Commerce Design", "Discovery Design", "Core UX Design", "Engagement Design"}
+    if _RW_KEEP: BIZ_DESIGN = set(_RW_KEEP)
     _rwr = []
     for r in (_rw.get("rows") or []):
         keep = [t for t in (r.get("t") or []) if t.replace("*", "").strip() in BIZ_DESIGN]
@@ -2449,6 +2452,22 @@ def main():
         except Exception:
             pass
 
+    # ── 업무 현황 전용 팀 (Marc 11-12 「업무 현황에만 팀을 추가해서」) ──
+    #   build_xt.py 가 같은 규칙으로 다른 조직 디자인팀(xteam.enc 명단)만 계산해 둔 xt.json 을 D["xt"] 로 싣고 지운다.
+    #   페이지는 업무 현황에서만, 허용된 사람에게만 합쳐 보여 준다. 평문 xt.json 은 공개 배포물에 남기지 않는다.
+    _xp = os.path.join(HERE, "xt.json")
+    try:
+        if os.path.exists(_xp):
+            D["xt"] = json.load(open(_xp, encoding="utf-8"))
+            print("업무 현황 전용 팀: %d팀" % len(D["xt"].get("teams") or []))
+    except Exception as _e:
+        print("업무 현황 전용 팀 건너뜀:", type(_e).__name__)
+    finally:
+        try:
+            if os.path.exists(_xp): os.remove(_xp)
+        except Exception:
+            pass
+
     D["basis"] = basis          # 페이지는 이 번들 하나만 받는다(팀 히스토리 basis._hist 포함)
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     out = os.path.join(HERE, "data.json")
@@ -2465,4 +2484,13 @@ def main():
 
 
 if __name__ == "__main__":
+    # 업무 현황 전용 팀(Core Product Design) 먼저 따로 계산 → xt.json (Marc 11-12). 워크플로 파일은 안 건드리고 여기서 부른다.
+    #   별도 프로세스라 본 빌드 상태와 섞이지 않고, 실패해도 본 빌드는 그대로 간다. xteam.enc 가 없으면 건너뛴다.
+    if os.path.exists(os.path.join(HERE, "xteam.enc")):
+        try:
+            import subprocess
+            subprocess.run([sys.executable, os.path.join(HERE, "build_xt.py")], cwd=HERE, timeout=1500, check=False,
+                           env=dict(os.environ, SLACK_TOKEN=""))
+        except Exception as _e:
+            print("업무 현황 전용 팀 건너뜀:", type(_e).__name__)
     main()
