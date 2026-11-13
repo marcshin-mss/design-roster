@@ -15,6 +15,7 @@
    · Secret JIRA_EMAIL / JIRA_TOKEN : 지라 API 계정 (Marc 가 직접 등록)
    · /auth 가 편집 토큰(12시간, GATE_HASH 로 서명)을 함께 배급 → 대시보드 sessionStorage pxd-et
    · /jira-edit  POST {token,key,set,add,remove} — FT 프로젝트 · 담당자/우선순위/시작일/마감일/라벨만
+   · /jira-get   POST {token,key} — FT 한 건의 지금 값(제목 · 상태 · 일정 · 설명 · 이미지 · 과제 발의 · 댓글). /jira-edit 는 제목 · 설명도 받음 (11-14)
    · /dd-editors POST {token[,acc]} — 편집 허용 지라 계정 목록(KV dd:editors) 읽기/저장(소유자 전용, 대시보드가 로스터로 자동 동기화)
    · /ft-lt      POST {token[,fresh]} — FT 리드타임(경윤님 기준) 행 + 개발 진입 시각 dvs, KV ft:lt2 3시간 캐시
    · /impact     POST {token,keys[]} — 론치 후 결과(QBR 공유사항·Impact Sharing Date), 1시간 캐시
@@ -119,6 +120,7 @@ const EDIT_TTL = 12 * 3600;
 const DD_PROJECT = "FT";
 const DD_PRI = ["Highest", "High", "Medium", "Low", "Lowest"];
 const DD_START = "customfield_10015";            /* 시작 날짜 */
+const DD_FULL = "project,assignee,priority,duedate,labels,summary,description,updated," + DD_START;   /* /jira-get · /jira-edit 이 읽는 필드 */
 /* 봇·프로세스용 라벨은 대시보드에서 지우지 못하게 */
 const DD_LOCK = /^(one|fasttrack|fast-track-.*|conveyor.*|auto-.*|pel.*|ux-ft.*|DUE_.*|.*-bot|.*리뷰제외|standby.*|seamless-.*|track-.*|test)$/i;
 
@@ -441,6 +443,117 @@ function ddPick(f) {
            labs: f.labels || [], acc: a ? a.accountId : "", asg: a ? String(a.displayName || "").split("/")[0].trim() : "" };
 }
 
+/* ── FT 한 건 실시간 읽기 + 제목 · 설명 수정 (Marc 11-14 「사이드시트로 띄울 땐 내용과 이미지 일정 등 지라의 모든 내용을 싱크 … 수정하면 수정도 지라에 반영」)
+   · /jira-get  POST {token,key} — FT 한 건의 지금 값: 제목 · 상태 · 우선순위 · 담당 · 일정 · 라벨 · 설명 · 이미지 · 연결된 과제 발의 · 최근 댓글
+   · /jira-edit 의 set 에 summary · description 추가. 설명은 가벼운 마크다운으로 주고받고, 고쳐도 잃는 것이 없는 설명일 때만 받는다
+     (표 · 이미지 · 멘션 · 색 글자 등이 있으면 desc-rich 로 거절 — 지라에서 직접 수정) */
+/* ADF → 보기용 마크다운. build.py adf_md 와 같은 표시(제목 '## ', 목록 '• ') */
+function adfMd(n, depth) {
+  depth = depth || 0;
+  if (n == null) return "";
+  if (Array.isArray(n)) return n.map(x => adfMd(x, depth)).join("");
+  if (typeof n !== "object") return typeof n === "string" ? n : "";
+  const t = n.type, at = n.attrs || {};
+  if (t === "text") {
+    let tx = n.text || "", href = null, strong = false;
+    for (const m of n.marks || []) { if (m.type === "link") href = (m.attrs || {}).href; else if (m.type === "strong") strong = true; }
+    if (href) tx = tx.trim() === href ? tx : "[" + tx.replace(/\]/g, ")") + "](" + href + ")";
+    if (strong && tx.trim()) tx = "**" + tx + "**";
+    return tx;
+  }
+  if (t === "hardBreak") return "\n";
+  if (t === "inlineCard" || t === "blockCard" || t === "embedCard") { const u = at.url || ""; return u ? u + (t !== "inlineCard" ? "\n" : "") : ""; }
+  if (t === "mention" || t === "emoji" || t === "status" || t === "date") return String(at.text || at.shortName || "");
+  const inner = adfMd(n.content, depth + (t === "bulletList" || t === "orderedList" ? 1 : 0));
+  if (t === "heading") return "## " + inner.trim() + "\n";
+  if (t === "listItem") { const L = inner.replace(/^\n+|\n+$/g, "").split("\n"); return "  ".repeat(Math.max(0, depth - 1)) + "• " + L.join("\n" + "  ".repeat(depth)) + "\n"; }
+  if (t === "paragraph" || t === "blockquote" || t === "codeBlock" || t === "tableRow") return inner + "\n";
+  if (t === "tableCell" || t === "tableHeader") return inner.trim() + " | ";
+  return inner;
+}
+const adfShow = d => adfMd(d).replace(/\n{3,}/g, "\n\n").trim().slice(0, 6000);
+
+/* 비교용 정리: 빈 문단 · localId 같은 곁가지를 빼고, 이모지는 글자로, 같은 서식의 이웃 글자는 합침 */
+const ADF_MARKS = ["link", "strong", "em", "strike", "code"];
+function adfNorm(n) {
+  if (!n || typeof n !== "object") return null;
+  const t = n.type, kids = c => { const o = []; for (const x of c || []) { const y = adfNorm(x); if (!y) continue;
+      const p = o[o.length - 1]; if (y.type === "text" && p && p.type === "text" && JSON.stringify(p.marks || []) === JSON.stringify(y.marks || [])) p.text += y.text; else o.push(y); } return o; };
+  if (t === "text") { if (!n.text) return null; const mk = (n.marks || []).map(m => m.type === "link" ? { type: "link", attrs: { href: String((m.attrs || {}).href || "") } } : { type: m.type })
+      .sort((a, b) => ADF_MARKS.indexOf(a.type) - ADF_MARKS.indexOf(b.type)); return mk.length ? { type: "text", text: n.text, marks: mk } : { type: "text", text: n.text }; }
+  if (t === "emoji") { const x = (n.attrs || {}).text; return x ? { type: "text", text: String(x) } : { type: "emoji" }; }
+  if (t === "hardBreak" || t === "rule") return { type: t };
+  if (t === "inlineCard") return { type: t, attrs: { url: String((n.attrs || {}).url || "") } };
+  const c = kids(n.content);
+  if (t === "paragraph") return c.length ? { type: t, content: c } : null;
+  if (t === "heading") return { type: t, attrs: { level: +((n.attrs || {}).level) || 1 }, content: c };
+  if (t === "doc") return { type: "doc", version: 1, content: c };
+  if (t === "orderedList" && (n.attrs || {}).order > 1) return { type: t, attrs: { order: n.attrs.order }, content: c };
+  return { type: t, content: c };
+}
+/* 설명 → 고치기용 마크다운 (# 제목 · - 목록 · 1. 번호 · **굵게** · *기울임* · ~~취소선~~ · `코드` · [글](주소) · <주소> · ---) */
+function adfSrc(doc) {
+  const d = adfNorm(doc); if (!d) return "";
+  const inl = c => (c || []).map(x => {
+    if (x.type === "hardBreak") return "\n";
+    if (x.type === "inlineCard") return "<" + x.attrs.url + ">";
+    if (x.type !== "text") return "\u0001";
+    let s = x.text; const has = k => (x.marks || []).find(m => m.type === k);
+    if (has("code")) s = "`" + s + "`"; if (has("strike")) s = "~~" + s + "~~"; if (has("em")) s = "*" + s + "*"; if (has("strong")) s = "**" + s + "**";
+    const l = has("link"); if (l) s = "[" + s + "](" + l.attrs.href + ")";
+    return s; }).join("");
+  const list = (n, ind) => n.content.map((li, i) => { const [p, ...rest] = li.content || [];
+    return "  ".repeat(ind) + (n.type === "orderedList" ? (i + 1) + ". " : "- ") + (p && p.type === "paragraph" ? inl(p.content) : "\u0001") +
+      rest.map(r => "\n" + (r.type === "bulletList" || r.type === "orderedList" ? list(r, ind + 1) : "\u0001")).join(""); }).join("\n");
+  return d.content.map(b => b.type === "paragraph" ? inl(b.content) : b.type === "heading" ? "#".repeat(b.attrs.level) + " " + inl(b.content)
+    : b.type === "rule" ? "---" : (b.type === "bulletList" || b.type === "orderedList") ? list(b, 0) : "\u0001").join("\n\n");
+}
+/* 고치기용 마크다운 → ADF */
+function mdAdf(md) {
+  const inl = (s, marks) => { const out = [], tx = (t, mk) => { if (t) out.push(mk.length ? { type: "text", text: t, marks: mk } : { type: "text", text: t }); };
+    const RE = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|<(https?:\/\/[^>\s]+)>|\*\*(.+?)\*\*|~~(.+?)~~|`([^`\n]+)`|\*([^*\n]+)\*/;
+    let m; while ((m = RE.exec(s))) { tx(s.slice(0, m.index), marks);
+      if (m[1] != null) out.push(...inl(m[1], marks.concat([{ type: "link", attrs: { href: m[2] } }])));
+      else if (m[3] != null) out.push({ type: "inlineCard", attrs: { url: m[3] } });
+      else if (m[4] != null) out.push(...inl(m[4], marks.concat([{ type: "strong" }])));
+      else if (m[5] != null) out.push(...inl(m[5], marks.concat([{ type: "strike" }])));
+      else if (m[6] != null) tx(m[6], marks.concat([{ type: "code" }]));
+      else out.push(...inl(m[7], marks.concat([{ type: "em" }])));
+      s = s.slice(m.index + m[0].length); }
+    tx(s, marks); return out; };
+  const para = lines => { const c = []; lines.forEach((l, i) => { if (i) c.push({ type: "hardBreak" }); c.push(...inl(l, [])); }); return c; };
+  const LI = /^(\s*)(-|\d+\.)\s+(.*)$/, B = [], L = String(md || "").replace(/\r/g, "").split("\n");
+  for (let i = 0; i < L.length;) {
+    const l = L[i]; let m;
+    if (!l.trim()) { i++; continue; }
+    if (/^---+\s*$/.test(l)) { B.push({ type: "rule" }); i++; continue; }
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) { B.push({ type: "heading", attrs: { level: m[1].length }, content: inl(m[2], []) }); i++; continue; }
+    if (LI.test(l)) { const rows = []; while (i < L.length && (m = LI.exec(L[i]))) { rows.push([m[1].length >> 1, m[2] !== "-", m[3]]); i++; }
+      const build = (from, ind) => { const node = { type: rows[from][1] ? "orderedList" : "bulletList", content: [] }; let j = from;
+        while (j < rows.length && rows[j][0] >= ind) { if (rows[j][0] > ind) { const [sub, nj] = build(j, rows[j][0]); const last = node.content[node.content.length - 1];
+            if (last) last.content.push(sub); else node.content.push({ type: "listItem", content: [{ type: "paragraph", content: [] }, sub] }); j = nj; continue; }
+          if (rows[j][1] !== (node.type === "orderedList") && node.content.length) break;
+          node.content.push({ type: "listItem", content: [{ type: "paragraph", content: inl(rows[j][2], []) }] }); j++; }
+        return [node, j]; };
+      let j = 0; while (j < rows.length) { const [node, nj] = build(j, rows[j][0]); B.push(node); j = nj; } continue; }
+    const p = []; while (i < L.length && L[i].trim() && !LI.test(L[i]) && !/^(#{1,6})\s+/.test(L[i]) && !/^---+\s*$/.test(L[i])) { p.push(L[i]); i++; }
+    B.push({ type: "paragraph", content: para(p) });
+  }
+  return { type: "doc", version: 1, content: B };
+}
+/* 대시보드에서 고쳐 저장해도 잃는 것이 없는 설명인가 — 마크다운으로 바꿨다 되돌렸을 때 그대로여야 함 */
+function adfSimple(doc) {
+  if (!doc) return true;
+  try { const a = adfNorm(doc), s = adfSrc(doc); if (s.includes("\u0001")) return false;
+    return JSON.stringify(adfNorm(mdAdf(s))) === JSON.stringify(a); } catch (e) { return false; }
+}
+const ddName = u => u ? String(u.displayName || "").split("/")[0].trim() : "";
+const ddImgs = a => (a || []).filter(x => /^image\//.test(x.mimeType || "")).sort((x, y) => String(x.created || "").localeCompare(String(y.created || ""))).slice(0, 8).map(x => +x.id || x.id);
+function ddFull(key, f) {
+  return Object.assign(ddPick(f), { k: key, t: f.summary || "", st: (f.status || {}).name || "", rep: ddName(f.reporter), cr: f.created || "", up: f.updated || "",
+    d: adfShow(f.description), src: adfSimple(f.description) ? adfSrc(f.description) : null, im: ddImgs(f.attachment) });
+}
+
 async function dispatch(env, wf) {
   const url = "https://api.github.com/repos/" + REPO + "/actions/workflows/" + wf + "/dispatches";
   return fetch(url, { method: "POST",
@@ -588,6 +701,25 @@ export default {
     }
 
     /* ── Design Driven: 지라 직접 수정 (FT · 담당자/우선순위/진행시기/라벨) ── */
+    if (req.method === "POST" && path === "/jira-get") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      const email = await editTokenEmail(env, b && b.token);
+      if (!email) return J({ ok: false, error: "auth" }, 403, cors);
+      if (!env.JIRA_EMAIL || !env.JIRA_TOKEN) return J({ ok: false, error: "no-jira" }, 501, cors);
+      const key = String(b.key || "").toUpperCase();
+      if (!new RegExp("^" + DD_PROJECT + "-\\d{1,6}$").test(key)) return J({ ok: false, error: "key" }, 400, cors);
+      const r = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + DD_FULL + ",reporter,created,status,attachment,issuelinks,comment");
+      if (!r.ok) return J({ ok: false, error: "jira-get", status: r.status }, 502, cors);
+      const f = r.j.fields || {};
+      if ((f.project || {}).key !== DD_PROJECT) return J({ ok: false, error: "project" }, 403, cors);
+      /* 연결된 과제 발의(ETR) — FT 로 옮겨 오며 본문이 ETR 에만 남은 건이 많음 */
+      const ek = [...new Set((f.issuelinks || []).map(l => ((l.inwardIssue || l.outwardIssue) || {}).key).filter(k => /^ETR-\d+$/.test(k || "")))].slice(0, 3);
+      const etr = await Promise.all(ek.map(async k => { try { const e = await jira(env, "GET", "/rest/api/3/issue/" + k + "?fields=summary,description,attachment,status");
+        if (!e.ok) return null; const g = e.j.fields || {}; return [+k.slice(4), adfShow(g.description).slice(0, 2500), ddImgs(g.attachment), g.summary || "", (g.status || {}).name || ""]; } catch (x) { return null; } }));
+      const cms = ((f.comment || {}).comments || []).map(c => [ddName(c.author), String(c.created || "").slice(0, 16), adfShow(c.body).slice(0, 800)]).filter(c => c[2] && !/^\[디자인 대시보드\]/.test(c[2]));
+      return J({ ok: true, issue: Object.assign(ddFull(key, f), { e: etr.filter(Boolean), cm: cms.slice(-5), cmn: cms.length }) }, 200, cors);
+    }
+
     if (req.method === "POST" && path === "/jira-edit") {
       let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
       const email = await editTokenEmail(env, b && b.token);
@@ -597,7 +729,7 @@ export default {
       if (!new RegExp("^" + DD_PROJECT + "-\\d{1,6}$").test(key)) return J({ ok: false, error: "key" }, 400, cors);
       const eds = await ddEditors(env), me = await jiraAccountOf(env, email);
       if (email !== OWNER && !(me && eds.includes(me.id))) return J({ ok: false, error: "not-editor" }, 403, cors);
-      const FL = "project,assignee,priority,duedate,labels," + DD_START;
+      const FL = DD_FULL;
       const cur = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + FL);
       if (!cur.ok) return J({ ok: false, error: "jira-get", status: cur.status }, 502, cors);
       if (((cur.j.fields || {}).project || {}).key !== DD_PROJECT) return J({ ok: false, error: "project" }, 403, cors);
@@ -617,6 +749,18 @@ export default {
         const pv = k === "start" ? before.sd : before.du;
         if ((v || "") !== (pv || "")) { fields[f] = v; ch.push(lab + " " + (pv || "-") + "→" + (v || "-")); }
       }
+      if ("summary" in set) {
+        const sm = String(set.summary || "").replace(/\s+/g, " ").trim();
+        if (!sm || sm.length > 255) return J({ ok: false, error: "summary" }, 400, cors);
+        if (sm !== (cur.j.fields.summary || "")) { fields.summary = sm; ch.push("제목"); }
+      }
+      if ("description" in set) {
+        const curD = cur.j.fields.description || null;
+        if (!adfSimple(curD)) return J({ ok: false, error: "desc-rich" }, 400, cors);                               /* 표 · 이미지 · 멘션 등이 있으면 여기서 고치지 않음 */
+        if (typeof b.base === "string" && b.base !== adfSrc(curD)) return J({ ok: false, error: "conflict" }, 409, cors);   /* 그 사이 지라에서 바뀜 */
+        const nd = mdAdf(String(set.description || "").slice(0, 30000));
+        if (JSON.stringify(adfNorm(nd)) !== JSON.stringify(adfNorm(curD) || { type: "doc", version: 1, content: [] })) { fields.description = nd; ch.push("설명"); }
+      }
       const okLab = l => typeof l === "string" && /^[^\s]{1,60}$/.test(l);
       const add = (Array.isArray(b.add) ? b.add : []).filter(okLab).filter(l => !before.labs.includes(l)).slice(0, 10);
       const rem = (Array.isArray(b.remove) ? b.remove : []).filter(okLab).filter(l => before.labs.includes(l)).slice(0, 10);
@@ -627,7 +771,7 @@ export default {
       const put = await jira(env, "PUT", "/rest/api/3/issue/" + key, { fields, update });
       if (!put.ok) return J({ ok: false, error: "jira-put", status: put.status, detail: (put.t || "").slice(0, 300) }, 502, cors);
       const aft = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + FL);
-      const issue = aft.ok ? ddPick(aft.j.fields) : null;
+      const issue = aft.ok ? Object.assign(ddPick(aft.j.fields), { t: aft.j.fields.summary || "", d: adfShow(aft.j.fields.description), src: adfSimple(aft.j.fields.description) ? adfSrc(aft.j.fields.description) : null }) : null;
       const who = (me && me.name) || email.split("@")[0];
       if (ch.includes("담당자")) ch[ch.indexOf("담당자")] = "담당자 " + (before.asg || "미배정") + "→" + ((issue && issue.asg) || "미배정");
       const line = ch.join(" · ");

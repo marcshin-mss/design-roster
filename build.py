@@ -1646,8 +1646,26 @@ def main():
         apply_assignments({m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")})
     except Exception as _e:
         print("담당자 배정 건너뜀:", type(_e).__name__)
-    ftn = jql("project = FT ORDER BY key ASC", FLD, cap=1500)
+    ftn = jql("project = FT ORDER BY key ASC", FLD + ["attachment", "issuelinks"], cap=1500)   # 첨부 이미지 · 연결된 과제 발의(ETR) — Design Driven 시트 (Marc 11-14)
     tmof = {m["name"]: t["name"] for t in teams for m in t["members"]}
+
+    def _img_ids(n):   # 이미지 첨부 id(올린 순, 최대 8) — 이미지는 저장하지 않고 페이지가 지라 주소로 보여 줌
+        try:
+            return [int(a.get("id")) for a in sorted(F(n, "attachment", default=[]) or [], key=lambda a: a.get("created") or "")
+                    if str(a.get("mimeType") or "").startswith("image/")][:8]
+        except Exception:
+            return []
+
+    def _etr_keys(n):   # 연결된 ETR(과제 발의) 키, 최대 3
+        try:
+            ks = []
+            for l in (F(n, "issuelinks", default=[]) or []):
+                k = (l.get("inwardIssue") or l.get("outwardIssue") or {}).get("key") or ""
+                if k.startswith("ETR-") and k not in ks:
+                    ks.append(k)
+            return ks[:3]
+        except Exception:
+            return []
 
     def _is_des(n, f):
         return org_of(F(n, f, "displayName") or "").endswith("Design")
@@ -1698,7 +1716,24 @@ def main():
                     re.sub(r"\n{3,}", "\n\n", adf_md(F(n, "description"))).strip()[:2500], day(F(n, "updated")) or "", st, asg or "",
                     [l for l in labs if l.startswith("one밀도감") or l == "design-driven"],
                     F(n, "priority", "name") or "", day(F(n, "customfield_10015")) or "", day(F(n, "duedate")) or "",   # [11] 우선순위 [12] 시작 [13] 마감
-                    labs, F(n, "assignee", "accountId") or "", rep or ""])   # [14] 라벨 전체 [15] 담당자 계정 [16] 보고자
+                    labs, F(n, "assignee", "accountId") or "", rep or "",   # [14] 라벨 전체 [15] 담당자 계정 [16] 보고자
+                    _img_ids(n), [[k] for k in _etr_keys(n)]])   # [17] 첨부 이미지 id [18] 연결된 과제 발의 [[ETR 번호, 설명, 이미지 id]] (Marc 11-14 「사이드시트에 지라내용과 이미지」)
+    # 연결된 과제 발의(ETR)의 설명 · 이미지 — FT 로 옮겨 오면서 본문이 ETR 에만 남은 건이 많음. 실패해도 FT 목록은 그대로.
+    try:
+        _ek = sorted({e[0] for r in one for e in (r[18] if len(r) > 18 else []) if e and e[0]})
+        _em = {}
+        for _i in range(0, len(_ek), 80):
+            for y in jql("key in (%s)" % ",".join(_ek[_i:_i + 80]), ["description", "attachment"], cap=200):
+                _em[y.get("key")] = [re.sub(r"\n{3,}", "\n\n", adf_md(F(y, "description"))).strip()[:2500], _img_ids(y)]
+        for r in one:
+            if len(r) > 18:
+                r[18] = [[int(e[0].split("-")[1])] + _em[e[0]] for e in r[18] if e and e[0] in _em]   # 키는 번호만(ETR-6004 → 6004) — 아래 론치 후 결과 조회가 지라 키 모양 문자열을 모두 모으므로
+        print("과제 발의(ETR) 연결: %d건 (이미지 있는 것 %d) · FT 첨부 이미지 %d건" % (len(_em), sum(1 for v in _em.values() if v[1]), sum(1 for r in one if len(r) > 17 and r[17])))
+    except Exception as _e:
+        print("과제 발의(ETR) 건너뜀:", type(_e).__name__, _e)
+        for r in one:
+            if len(r) > 18:
+                r[18] = []
     ft.sort(key=lambda r: (r[1], r[0]))
     one.sort(key=lambda r: r[0])
     if len(one) < 20:
