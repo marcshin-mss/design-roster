@@ -120,7 +120,8 @@ const EDIT_TTL = 12 * 3600;
 const DD_PROJECT = "FT";
 const DD_PRI = ["Highest", "High", "Medium", "Low", "Lowest"];
 const DD_START = "customfield_10015";            /* 시작 날짜 */
-const DD_FULL = "project,assignee,priority,duedate,labels,summary,description,updated," + DD_START;   /* /jira-get · /jira-edit 이 읽는 필드 */
+const DD_STATUS = ["Backlog", "HOLD", "Dropped"];   /* 대시보드에서 바꿀 수 있는 FT 진행 여부 (Marc 11-14 「FT 과제 관리 … 홀드, 드롭 등 진행 여부를 판단」) */
+const DD_FULL = "project,assignee,priority,duedate,labels,summary,description,updated,status," + DD_START;   /* /jira-get · /jira-edit 이 읽는 필드 */
 /* 봇·프로세스용 라벨은 대시보드에서 지우지 못하게 */
 const DD_LOCK = /^(one|fasttrack|fast-track-.*|conveyor.*|auto-.*|pel.*|ux-ft.*|DUE_.*|.*-bot|.*리뷰제외|standby.*|seamless-.*|track-.*|test)$/i;
 
@@ -761,6 +762,17 @@ export default {
         const nd = mdAdf(String(set.description || "").slice(0, 30000));
         if (JSON.stringify(adfNorm(nd)) !== JSON.stringify(adfNorm(curD) || { type: "doc", version: 1, content: [] })) { fields.description = nd; ch.push("설명"); }
       }
+      let trTo = null;
+      if ("status" in set) {   /* FT 진행 여부: 지라 워크플로에 그 상태로 가는 전환이 있을 때만 */
+        const want = String(set.status || ""), curS = (cur.j.fields.status || {}).name || "";
+        if (!DD_STATUS.includes(want)) return J({ ok: false, error: "status" }, 400, cors);
+        if (want.toLowerCase() !== curS.toLowerCase()) {
+          const tr = await jira(env, "GET", "/rest/api/3/issue/" + key + "/transitions");
+          const T = (tr.ok && tr.j && tr.j.transitions) || [], hit = T.find(x => String((x.to || {}).name || "").toLowerCase() === want.toLowerCase());
+          if (!hit) return J({ ok: false, error: "transition", from: curS, avail: T.map(x => (x.to || {}).name).filter(Boolean) }, 409, cors);
+          trTo = hit.id; ch.push("상태 " + (curS || "-") + "→" + want);
+        }
+      }
       const okLab = l => typeof l === "string" && /^[^\s]{1,60}$/.test(l);
       const add = (Array.isArray(b.add) ? b.add : []).filter(okLab).filter(l => !before.labs.includes(l)).slice(0, 10);
       const rem = (Array.isArray(b.remove) ? b.remove : []).filter(okLab).filter(l => before.labs.includes(l)).slice(0, 10);
@@ -768,10 +780,16 @@ export default {
       if (add.length || rem.length) { update.labels = [...add.map(l => ({ add: l })), ...rem.map(l => ({ remove: l }))];
         ch.push("라벨" + (add.length ? " +" + add.join(" +") : "") + (rem.length ? " -" + rem.join(" -") : "")); }
       if (!ch.length) return J({ ok: true, same: true, issue: before }, 200, cors);
-      const put = await jira(env, "PUT", "/rest/api/3/issue/" + key, { fields, update });
-      if (!put.ok) return J({ ok: false, error: "jira-put", status: put.status, detail: (put.t || "").slice(0, 300) }, 502, cors);
+      if (Object.keys(fields).length || Object.keys(update).length) {
+        const put = await jira(env, "PUT", "/rest/api/3/issue/" + key, { fields, update });
+        if (!put.ok) return J({ ok: false, error: "jira-put", status: put.status, detail: (put.t || "").slice(0, 300) }, 502, cors);
+      }
+      if (trTo) {
+        const tp = await jira(env, "POST", "/rest/api/3/issue/" + key + "/transitions", { transition: { id: trTo } });
+        if (!tp.ok) return J({ ok: false, error: "jira-put", status: tp.status, detail: (tp.t || "").slice(0, 300) }, 502, cors);
+      }
       const aft = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + FL);
-      const issue = aft.ok ? Object.assign(ddPick(aft.j.fields), { t: aft.j.fields.summary || "", d: adfShow(aft.j.fields.description), src: adfSimple(aft.j.fields.description) ? adfSrc(aft.j.fields.description) : null }) : null;
+      const issue = aft.ok ? Object.assign(ddPick(aft.j.fields), { t: aft.j.fields.summary || "", st: (aft.j.fields.status || {}).name || "", d: adfShow(aft.j.fields.description), src: adfSimple(aft.j.fields.description) ? adfSrc(aft.j.fields.description) : null }) : null;
       const who = (me && me.name) || email.split("@")[0];
       if (ch.includes("담당자")) ch[ch.indexOf("담당자")] = "담당자 " + (before.asg || "미배정") + "→" + ((issue && issue.asg) || "미배정");
       const line = ch.join(" · ");
