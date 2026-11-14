@@ -2,11 +2,12 @@ name: 워커 배포
 # 리포의 worker.js 가 바뀌면 Cloudflare Worker(design-roster-sync)에 올린다 (Marc 2026-11-04 「로그인 연결 없이」).
 # Cloudflare API 토큰(Workers 스크립트 편집 권한)을 GitHub secret CF_API_TOKEN 에 넣어 두면 동작한다. 없으면 건너뛴다.
 # 대시보드 API 와 같은 엔드포인트(content PUT)라 KV · 시크릿 바인딩은 그대로 유지된다.
+# 지라 계정 · 토큰은 빌드(refresh.yml)가 쓰는 GitHub secret 을 워커 시크릿으로 그대로 넣는다 (Marc 2026-11-14) — 토큰이 바뀌면 GitHub secret 만 바꾸고 이 워크플로를 다시 돌리면 된다.
 
 on:
   push:
     branches: [main]
-    paths: [worker.js]
+    paths: [worker.js, .github/workflows/deploy-worker.yml]
   workflow_dispatch:
 
 permissions:
@@ -43,3 +44,52 @@ jobs:
           curl -sS -X PUT "$API/schedules" -H "Authorization: Bearer $T" -H 'content-type: application/json' \
             -d '[{"cron":"*/5 0-11 * * 1-5"}]' > /tmp/r2.json
           python3 -c "import json,sys;j=json.load(open('/tmp/r2.json'));print('schedules:', 'ok' if j.get('success') else j.get('errors'));sys.exit(0 if j.get('success') else 1)"
+      - name: 지라 계정을 워커 시크릿으로 넣기
+        # 값은 GitHub secret → Cloudflare secret 으로만 지나가고 로그에는 찍지 않는다.
+        # 먼저 그 계정으로 지라 로그인 · FT 조회가 되는지 확인하고, 안 되면 워커에 넣지 않는다.
+        env:
+          JIRA_BASE: ${{ secrets.JIRA_BASE }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+        run: |
+          if [ -z "$CF_API_TOKEN" ] || [ -z "$JIRA_EMAIL" ] || [ -z "$JIRA_TOKEN" ]; then echo "::warning::CF_API_TOKEN · JIRA_EMAIL · JIRA_TOKEN 중 없는 것이 있어 지라 시크릿 넣기를 건너뜁니다"; exit 0; fi
+          T=$(printf '%s' "$CF_API_TOKEN" | tr -d '\r' | sed -n 's/.*Bearer[[:space:]]*\([^[:space:]"]*\).*/\1/p' | head -1)
+          [ -n "$T" ] || T=$(printf '%s' "$CF_API_TOKEN" | tr -d '[:space:]')
+          echo "::add-mask::$T"
+          CF_T="$T" python3 - <<'PY'
+          import os, json, base64, sys, urllib.request, urllib.error
+          em = os.environ["JIRA_EMAIL"].strip()
+          tk = "".join(os.environ["JIRA_TOKEN"].split())
+          base = (os.environ.get("JIRA_BASE") or "https://musinsa-oneteam.atlassian.net").strip().rstrip("/")
+          def call(url, method="GET", headers=None, body=None):
+              req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, r.read()
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()
+              except Exception as e:
+                  return 0, b""
+          H = {"authorization": "Basic " + base64.b64encode((em + ":" + tk).encode()).decode(), "accept": "application/json", "content-type": "application/json"}
+          st1, _ = call(base + "/rest/api/3/myself", headers=H)
+          st2, b2 = call(base + "/rest/api/3/search/jql", "POST", H, json.dumps({"jql": "project = FT ORDER BY updated DESC", "maxResults": 1, "fields": ["updated"]}).encode())
+          try:
+              n = len(json.loads(b2 or b"{}").get("issues") or []) if st2 == 200 else 0
+          except Exception:
+              n = 0
+          print("jira 로그인:", st1, "· FT 조회:", st2, "건수", n)
+          if st1 != 200 or n < 1:
+              print("::error::빌드용 지라 계정으로 FT 가 읽히지 않아 워커에 넣지 않았습니다")
+              sys.exit(1)
+          cf, api, ok = os.environ["CF_T"], os.environ["API"], True
+          for name, val in (("JIRA_EMAIL", em), ("JIRA_TOKEN", tk)):
+              st, b = call(api + "/secrets", "PUT", {"authorization": "Bearer " + cf, "content-type": "application/json"}, json.dumps({"name": name, "text": val, "type": "secret_text"}).encode())
+              try:
+                  j = json.loads(b)
+              except Exception:
+                  j = {}
+              good = st == 200 and bool(j.get("success"))
+              print("워커 시크릿", name + ":", "ok" if good else "실패 HTTP %s %s" % (st, [(e.get("code"), e.get("message")) for e in (j.get("errors") or [])]))
+              ok = ok and good
+          sys.exit(0 if ok else 1)
+          PY
