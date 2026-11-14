@@ -91,5 +91,27 @@ jobs:
               good = st == 200 and bool(j.get("success"))
               print("워커 시크릿", name + ":", "ok" if good else "실패 HTTP %s %s" % (st, [(e.get("code"), e.get("message")) for e in (j.get("errors") or [])]))
               ok = ok and good
-          sys.exit(0 if ok else 1)
+          if not ok:
+              sys.exit(1)
+          # 예전에 대시보드에서 넣은 일반 변수 JIRA_EMAIL · JIRA_TOKEN(암호화 안 됨)은 새 시크릿이 들어간 뒤 지운다 (Marc 2026-11-14 「워커에 남은 옛 변수도 알아서 지워」).
+          # 이름과 종류만 보고, 값은 읽지도 찍지도 않는다. 지우지 못해도 배포는 실패로 치지 않는다.
+          st, b = call(api + "/settings", headers={"authorization": "Bearer " + cf})
+          kinds = {}
+          try:
+              for x in ((json.loads(b).get("result") or {}).get("bindings") or []):
+                  kinds[str(x.get("name"))] = str(x.get("type"))
+          except Exception:
+              kinds = {}
+          print("워커 바인딩(이름 · 종류):", st, sorted(kinds.items()))
+          for name in ("JIRA_EMAIL", "JIRA_TOKEN"):
+              if kinds.get(name) == "plain_text" and kinds.get(name + "_S") == "secret_text":
+                  st, b = call(api + "/secrets/" + name, "DELETE", {"authorization": "Bearer " + cf})
+                  try:
+                      j = json.loads(b)
+                  except Exception:
+                      j = {}
+                  good = st == 200 and bool(j.get("success"))
+                  print("옛 변수", name, "지우기:", "ok" if good else "실패 HTTP %s %s" % (st, [(e.get("code"), e.get("message")) for e in (j.get("errors") or [])]))
+              else:
+                  print("옛 변수", name, "건너뜀:", kinds.get(name), "/", kinds.get(name + "_S"))
           PY
