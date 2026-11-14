@@ -82,7 +82,7 @@ jobs:
               print("::error::빌드용 지라 계정으로 FT 가 읽히지 않아 워커에 넣지 않았습니다")
               sys.exit(1)
           cf, api, ok = os.environ["CF_T"], os.environ["API"], True
-          for name, val in (("JIRA_EMAIL", em), ("JIRA_TOKEN", tk)):
+          for name, val in (("JIRA_EMAIL_S", em), ("JIRA_TOKEN_S", tk)):   # 일반 변수 JIRA_EMAIL · JIRA_TOKEN 과 이름이 겹치면 거절(10053)되어 다른 이름으로 넣고, 워커가 이 값을 먼저 쓴다
               st, b = call(api + "/secrets", "PUT", {"authorization": "Bearer " + cf, "content-type": "application/json"}, json.dumps({"name": name, "text": val, "type": "secret_text"}).encode())
               try:
                   j = json.loads(b)

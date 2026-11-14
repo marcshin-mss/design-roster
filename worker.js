@@ -566,9 +566,18 @@ async function dispatch(env, wf) {
     body: JSON.stringify({ ref: "main" }) });
 }
 
+/* 지라 계정: 배포 워크플로가 GitHub secret 을 워커 시크릿 JIRA_EMAIL_S · JIRA_TOKEN_S 로 넣어 준다(11-14).
+   예전에 대시보드에서 넣은 일반 변수 JIRA_EMAIL · JIRA_TOKEN 과 이름이 겹치면 Cloudflare 가 거절(10053)해서 이름을 달리했고, 새 값이 있으면 그것을 먼저 쓴다. */
+function jiraEnv(env) {
+  if (!env || (!env.JIRA_EMAIL_S && !env.JIRA_TOKEN_S)) return env;
+  /* env 가 얼려 있어도 되도록 빈 객체를 감싼다 */
+  return new Proxy({}, { get: (_, k) => (k === "JIRA_EMAIL" && env.JIRA_EMAIL_S) ? env.JIRA_EMAIL_S : (k === "JIRA_TOKEN" && env.JIRA_TOKEN_S) ? env.JIRA_TOKEN_S : env[k], has: (_, k) => k in env });
+}
+
 export default {
-  async scheduled(ev, env, ctx) { ctx.waitUntil(jiraWatch(env).catch(() => null)); },
+  async scheduled(ev, env, ctx) { env = jiraEnv(env); ctx.waitUntil(jiraWatch(env).catch(() => null)); },
   async fetch(req, env) {
+    env = jiraEnv(env);
     const path0 = new URL(req.url).pathname, reqOrigin = req.headers.get("origin") || "";
     const cors = {
       "Access-Control-Allow-Origin": (reqOrigin === RUNWAY_ORIGIN && (path0 === "/rw-push" || path0 === "/sync-done" || path0 === "/sync-req")) ? RUNWAY_ORIGIN : ORIGIN,
