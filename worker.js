@@ -118,6 +118,7 @@ async function allowList(env) {
 const JIRA_BASE = "https://musinsa-oneteam.atlassian.net";
 const EDIT_TTL = 12 * 3600;
 const DD_PROJECT = "FT";
+const JV_PROJECTS = ["FT", "TM", "PD", "M29CMPROD", "PEL"];   /* 시트에서 지라 내용을 다시 읽을 수 있는 프로젝트 — 읽기만. 수정(/jira-edit)은 FT 만 (Marc 11-14 「전체 메뉴에 사이드 시트에서 상위 지라를 보는 방식 … 맞췄어?」) */
 const DD_PRI = ["Highest", "High", "Medium", "Low", "Lowest"];
 const DD_START = "customfield_10015";            /* 시작 날짜 */
 const DD_STATUS = ["Backlog", "HOLD", "Dropped"];   /* 대시보드에서 바꿀 수 있는 FT 진행 여부 (Marc 11-14 「FT 과제 관리 … 홀드, 드롭 등 진행 여부를 판단」) */
@@ -717,17 +718,17 @@ export default {
       if (!email) return J({ ok: false, error: "auth" }, 403, cors);
       if (!env.JIRA_EMAIL || !env.JIRA_TOKEN) return J({ ok: false, error: "no-jira" }, 501, cors);
       const key = String(b.key || "").toUpperCase();
-      if (!new RegExp("^" + DD_PROJECT + "-\\d{1,6}$").test(key)) return J({ ok: false, error: "key" }, 400, cors);
+      if (!new RegExp("^(" + JV_PROJECTS.join("|") + ")-\\d{1,7}$").test(key)) return J({ ok: false, error: "key" }, 400, cors);
       const r = await jira(env, "GET", "/rest/api/3/issue/" + key + "?fields=" + DD_FULL + ",reporter,created,status,attachment,issuelinks,comment");
       if (!r.ok) return J({ ok: false, error: "jira-get", status: r.status }, 502, cors);
       const f = r.j.fields || {};
-      if ((f.project || {}).key !== DD_PROJECT) return J({ ok: false, error: "project" }, 403, cors);
+      const pk = (f.project || {}).key; if (!JV_PROJECTS.includes(pk)) return J({ ok: false, error: "project" }, 403, cors);   /* 옮겨진 티켓은 지금 프로젝트로 판단 */
       /* 연결된 과제 발의(ETR) — FT 로 옮겨 오며 본문이 ETR 에만 남은 건이 많음 */
-      const ek = [...new Set((f.issuelinks || []).map(l => ((l.inwardIssue || l.outwardIssue) || {}).key).filter(k => /^ETR-\d+$/.test(k || "")))].slice(0, 3);
+      const ek = pk !== DD_PROJECT ? [] : [...new Set((f.issuelinks || []).map(l => ((l.inwardIssue || l.outwardIssue) || {}).key).filter(k => /^ETR-\d+$/.test(k || "")))].slice(0, 3);
       const etr = await Promise.all(ek.map(async k => { try { const e = await jira(env, "GET", "/rest/api/3/issue/" + k + "?fields=summary,description,attachment,status");
         if (!e.ok) return null; const g = e.j.fields || {}; return [+k.slice(4), adfShow(g.description).slice(0, 2500), ddImgs(g.attachment), g.summary || "", (g.status || {}).name || ""]; } catch (x) { return null; } }));
       const cms = ((f.comment || {}).comments || []).map(c => [ddName(c.author), String(c.created || "").slice(0, 16), adfShow(c.body).slice(0, 800)]).filter(c => c[2] && !/^\[디자인 대시보드\]/.test(c[2]));
-      return J({ ok: true, issue: Object.assign(ddFull(key, f), { e: etr.filter(Boolean), cm: cms.slice(-5), cmn: cms.length }) }, 200, cors);
+      return J({ ok: true, issue: Object.assign(ddFull(r.j.key || key, f), { pk, ro: pk !== DD_PROJECT, e: etr.filter(Boolean), cm: cms.slice(-5), cmn: cms.length }) }, 200, cors);
     }
 
     if (req.method === "POST" && path === "/jira-edit") {

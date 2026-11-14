@@ -184,6 +184,69 @@ def state_of(n):
     return "예정"
 
 
+def status_since(cur):
+    """키 → [지금 상태로 바뀐 날(KST), 바꾼 사람, 전 상태] — 상태 변경 기록에서 지금 상태로 들어온 마지막 전환.
+    cur = {키: 지금 상태 이름}. 홀드 · 드롭 처리일 표시용 (Marc 11-14 「언제 홀드 처리 됐는지도 표기」)."""
+    keys = sorted(cur)
+    if not keys:
+        return {}
+    ids = {}
+    for i in range(0, len(keys), 80):
+        try:
+            for y in jql("key in (%s)" % ",".join(keys[i:i + 80]), ["status"], cap=200):
+                ids[str(y.get("id"))] = y.get("key")
+        except Exception as e:
+            print("  처리일 키 조회 건너뜀:", type(e).__name__)
+    if not ids:
+        return {}
+
+    def _ms(v):
+        if isinstance(v, (int, float)):
+            return v * 1000 if v < 1e12 else v
+        try:
+            t = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", str(v))
+            return datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000
+        except Exception:
+            return None
+
+    best, token, idl = {}, None, sorted(ids)
+    for _ in range(50):
+        body = {"issueIdsOrKeys": idl, "fieldIds": ["status"], "maxResults": 10000}
+        if token:
+            body["nextPageToken"] = token
+        req = urllib.request.Request(
+            BASE + "/rest/api/3/changelog/bulkfetch",
+            data=json.dumps(body).encode(),
+            headers={
+                "Authorization": "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode(),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            })
+        with urllib.request.urlopen(req, timeout=60) as r:
+            d = json.load(r)
+        for c in d.get("issueChangeLogs") or []:
+            k = ids.get(str(c.get("issueId")))
+            if not k:
+                continue
+            want = str(cur.get(k) or "").strip().upper()
+            for hst in c.get("changeHistories") or []:
+                t = _ms(hst.get("created"))
+                if t is None:
+                    continue
+                for it in hst.get("items") or []:
+                    if (it.get("fieldId") or it.get("field")) != "status":
+                        continue
+                    if str(it.get("toString") or "").strip().upper() != want:
+                        continue
+                    if k not in best or t > best[k][0]:
+                        best[k] = (t, str((hst.get("author") or {}).get("displayName") or "").split("/")[0].strip(), str(it.get("fromString") or ""))
+        token = d.get("nextPageToken")
+        if not token:
+            break
+    kst = datetime.timezone(datetime.timedelta(hours=9))
+    return {k: [datetime.datetime.fromtimestamp(v[0] / 1000, kst).strftime("%Y-%m-%d"), v[1], v[2]] for k, v in best.items()}
+
+
 def decrypt(box: dict, password: str) -> str:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     b = lambda x: base64.b64decode(x)
@@ -1745,6 +1808,20 @@ def main():
         D["one"] = one
     D["nodN"] = len(D["one"])
     D["acc"] = {m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")}   # Design Driven 담당자 지정용
+    # ── 7.15 홀드 · 드롭 처리일 — FT(HOLD · 중단) + 디자인 티켓(HOLD)이 지금 상태로 바뀐 날 · 바꾼 사람 (Marc 11-14)
+    #   D["hold"] = {키: [날짜, 바꾼 사람, 전 상태]}. 실패해도 나머지 데이터는 그대로.
+    D["hold"] = {}
+    try:
+        _hk = {r[0]: str(r[8]) for r in D["one"] if len(r) > 8 and r[8] and (str(r[8]).upper() == "HOLD" or r[1] == "중단")}
+        for _P in list((D.get("pjq") or {}).values()) + [D.get("pj") or {}]:
+            for _rows in ((_P or {}).get("tk") or {}).values():
+                for _r in _rows:
+                    if len(_r) > 5 and str(_r[5]).upper() == "HOLD":
+                        _hk[_r[0]] = str(_r[5])
+        D["hold"] = status_since(_hk)
+        print("홀드 · 드롭 처리일: %d / %d건" % (len(D["hold"]), len(_hk)))
+    except Exception as _e:
+        print("홀드 · 드롭 처리일 건너뜀:", type(_e).__name__, _e)
     _sc = {}
     for r in one:
         _sc[r[1]] = _sc.get(r[1], 0) + 1
