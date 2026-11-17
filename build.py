@@ -812,6 +812,7 @@ def main():
            "created", "resolutiondate", "labels", "project", "updated", "description", "priority", "duedate",
            "customfield_10015",   # 시작 날짜
            "customfield_12766",   # Estimate MD — 대시보드 분기 크기가 없을 때 크기로 씀 (Marc 11-03)
+           "customfield_10067",   # Stakeholder(요청 · 이해관계 조직) — 리소스 관리 「업무 범위 · 조직별」 (Marc 11-17)
            "statuscategorychangedate"]   # 상태 범주가 바뀐 날 — 진행 중 티켓의 '진행 시작일'(시작 날짜를 안 넣어도 됨, Marc 11-03)
 
     # ── 1. 실무 티켓 ────────────────────────────────────────────────
@@ -1678,9 +1679,26 @@ def main():
                 _lo[_k] = _wl
             print("분기 프로젝트 %s: 상위 %d개 · 티켓 %d건 · runway 계획 %d건(티켓 없음 %d) · 분기 계획 %d" % (
                 _qlab(q0), len(_pj), sum(len(v) for v in _pjt.values()), len(_rw6), _add, len(_pl)))
+            # 과제별 요청 · 이해관계 조직(지라 Stakeholder) — 앞 번호는 떼고 여러 값은 | 로 잇는다. 값이 없는 과제는 싣지 않는다 (Marc 11-17)
+            def _skv(_k0):
+                _v = F(meta.get(_k0, {}), "customfield_10067")
+                _o = []
+                for _x in (_v if isinstance(_v, list) else []):
+                    _s = re.sub(r"^\d+\.?\s*", "", str((_x.get("value") if isinstance(_x, dict) else _x) or "")).strip().replace(", ", "·")
+                    if _s and _s not in _o:
+                        _o.append(_s)
+                return "|".join(_o)
+            _sk = {}
+            for _k0 in set(_pj) | set(_pje):
+                try:
+                    _sv = _skv(_k0)
+                except Exception:
+                    _sv = ""
+                if _sv:
+                    _sk[_k0] = _sv
             return {"qs": qs, "qe": qe, "q": _qlab(q0), "cur": 1 if cur else 0, "init": _pj, "lo": _lo, "tk": _pjt, "ep": _pje, "epd": _pjd, "dx": {k: v for k, v in _pjx.items() if v},
                     "rw": {k: v[:4] + [v[5]] for k, v in _rw6.items()}, "rwas": _rwas, "pl": _pl,
-                    "ld": _ld, "ldas": _ldas if _ld else ""}
+                    "ld": _ld, "ldas": _ldas if _ld else "", "sk": _sk}
 
         # 분기 보관 (Marc 2026-10-28): 26 4Q 부터 분기가 끝나면 그 분기 마지막 빌드 데이터를 그대로 보관한다.
         #   지난 data.json 의 pjq 중 이번 분기가 아닌 분기(≥ ARCH_FROM)는 그대로 이어 싣고, 다시 만들지 않는다(지라가 바뀌어도 그 분기 숫자는 고정).
