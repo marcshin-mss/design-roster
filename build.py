@@ -2330,7 +2330,9 @@ def main():
     # ── 론치 후 결과 · Health Check 스냅샷 (Marc 11-02 「실시간 아니어도 돼, 하루 한 번」)
     #   지라 'QBR 공유사항'(customfield_10710) · Impact Sharing Date(19702) · Health Check(10071) 를 하루 한 번만 받아 D["imp"] 에 싣는다.
     #   행 = [키, 제목, 상태, 해결일, 공유일, QBR 글, Health, 기한] — Worker /impact 와 같은 모양(페이지는 이게 있으면 Worker 를 부르지 않음).
-    #   지난 data.json 의 스냅샷이 오늘(한국 날짜) 것이면 그대로 이어 싣는다(그날 첫 빌드 = 평일 07시에 갱신). 실패해도 빌드는 계속.
+    #   지난 data.json 의 스냅샷이 지금과 같은 구간이면 그대로 이어 싣는다. 실패해도 빌드는 계속.
+    #   구간 = 한국 시각 00~10시 · 10~15시 · 15~24시 → 하루 세 번(그날 첫 빌드 · 10시 뒤 첫 빌드 · 15시 뒤 첫 빌드) 새로 받는다
+    #   (Marc 11-19 「10시 15시 같이 받도록」 — 당일 론치가 디자인 성과에 다음 날에야 보이던 것).
     try:
         import time as _tm
         _old = _old_data() or {}
@@ -2349,8 +2351,10 @@ def main():
                 for _v in o: _walk(_v)
         _walk(D.get("pjq")); _walk(D.get("pj")); _walk(D.get("one")); _walk(D.get("ft"))
         _ks = sorted(k for k in _ks if isinstance(k, str) and _rk.match(k))
-        _kst = lambda ms: datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600).strftime("%Y-%m-%d")
-        if _prev and _kst(int(_prev.get("at") or 0)) == _kst(_now) and not os.environ.get("IMP_FORCE"):   # 한국 날짜로 하루 한 번(그날 첫 빌드 = 평일 07시)
+        def _kst(ms):   # 한국 날짜 + 구간(0: 00~10시 · 1: 10~15시 · 2: 15~24시)
+            _d = datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600)
+            return _d.strftime("%Y-%m-%d") + "#%d" % (0 if _d.hour < 10 else 1 if _d.hour < 15 else 2)
+        if _prev and _kst(int(_prev.get("at") or 0)) == _kst(_now) and not os.environ.get("IMP_FORCE"):   # 같은 구간이면 지난 것 유지
             D["imp"] = _prev
             print("론치 후 결과 스냅샷: 지난 것 유지 (%d행)" % len(_prev.get("rows") or []))
         elif _ks and EMAIL and TOKEN:
@@ -2410,14 +2414,16 @@ def main():
     # ── 조직 전체 론치 성과 (Marc 11-03 「Runway 위클리 — 모든 조직 과제, 29CM·다른 조직 포함, 자동 업데이트」)
     #   Runway 그룹 위클리(MSS·29CM·CBP·PBO·DI·EF·Security)는 지라 필터 → 같은 원천을 지라에서 직접 읽는다(Runway 로그인 불필요).
     #   대상 = 지난 분기 시작 이후 론치완료·배포완료 이니셔티브(회사 전체). 행 = [키, 제목, 상태, 해결일, 공유일, QBR 공유사항, Weekly 공유사항, Group, Sub Group, 담당, 라벨]
-    #   하루 한 번(한국 날짜) — D.imp 와 같은 규칙. 실패하면 지난 값 유지.
+    #   하루 세 번(한국 시각 00~10시 · 10~15시 · 15~24시 구간마다 첫 빌드) — D.imp 와 같은 규칙. 실패하면 지난 값 유지.
     _wprev = None
     try:
         import time as _tm2
         _old2 = _old_data() or {}
         _wprev = _old2.get("wko") if isinstance(_old2, dict) else None
         _now2 = int(_tm2.time() * 1000)
-        _kst2 = lambda ms: datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600).strftime("%Y-%m-%d")
+        def _kst2(ms):   # 한국 날짜 + 구간(0: 00~10시 · 1: 10~15시 · 2: 15~24시) — D.imp 와 같음
+            _d = datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600)
+            return _d.strftime("%Y-%m-%d") + "#%d" % (0 if _d.hour < 10 else 1 if _d.hour < 15 else 2)
         if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE") and all(len(r) > 11 for r in (_wprev.get("rows") or [])):
             D["wko"] = _wprev
             print("조직 전체 론치 성과: 지난 것 유지 (%d행)" % len(_wprev.get("rows") or []))
