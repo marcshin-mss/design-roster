@@ -26,3 +26,6 @@ xt.json
 
 # 리서처 성과 스냅샷(평문 → seal.py 로 uxr.enc)
 uxr.json
+# 디자인 측정 · 디자이너 성과 보강 스냅샷(평문 → seal.py 로 dm.enc · dq.enc)
+dm.json
+dq.json

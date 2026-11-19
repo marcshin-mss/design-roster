@@ -1856,6 +1856,16 @@ def main():
             print("리서처 성과 스냅샷: %s 기준 · 리서치 %d" % (_rx.get("asof", "?"), len(_rx["st"])))
     except Exception as _e:
         print("리서처 성과 스냅샷 건너뜀:", type(_e).__name__, _e)
+    # 디자인 측정 · 디자이너 성과 보강 스냅샷 — 예약 작업이 프로젝트 문서로 갱신하고 맥이 dm.enc · dq.enc 로 봉인 (Marc 11-19 「앞으로 성과를 이렇게 고도화 하면서 싱크되도록」)
+    #   dm = {v, asof, m:{과제 키: 측정 줄}} → 페이지가 V2DM 위에 덮음 / dq = {v, asof, q:{과제 키: {t, i:[성과 항목], r?}}} → 페이지가 성과 자료에 합침. 없으면 건너뜀.
+    for _nm, _key, _fld in (("dm", "dmx", "m"), ("dq", "dqx", "q")):
+        try:
+            _sx = load_sealed(_nm)
+            if isinstance(_sx, dict) and isinstance(_sx.get(_fld), dict):
+                D[_key] = _sx
+                print("%s 스냅샷: %s 기준 · %d건" % (_nm, _sx.get("asof", "?"), len(_sx[_fld])))
+        except Exception as _e:
+            print("%s 스냅샷 건너뜀:" % _nm, type(_e).__name__)
     D["slm"] = load_sealed("slackm") or []      # 채널 멤버 메일(비공개 채널 링크는 멤버에게만, Marc 10-29)
 
     # ── 7.3 PEL 협업 에픽 (Biz-E Product Engineering Lab) — 디자인 관련만 (Marc 10-29) ──
