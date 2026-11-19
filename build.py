@@ -1847,6 +1847,15 @@ def main():
 
     # ── 7.2 슬랙 의장 보고(#one-제품디자인실) — 봇 토큰이 있으면 자동 갱신 ──
     D["sl"] = slack_reports(people, ft) or load_sealed("slack") or []
+    # 리서처 성과 스냅샷(uxr.enc — 예약 작업이 슬랙 채널 · 지라 · 위키를 읽어 갱신, Marc 2026-11-19 「갱신스케줄도 잡아줘」).
+    #   모양 = {asof, from, st:[리서치], sh:[결과 공유], pub:[정기 발행], rq:[요청 대응], im:[임팩트]}. 없으면 싣지 않는다(페이지는 내장 스냅샷을 씀).
+    try:
+        _rx = load_sealed("uxr")
+        if isinstance(_rx, dict) and isinstance(_rx.get("st"), list):
+            D["rx"] = _rx
+            print("리서처 성과 스냅샷: %s 기준 · 리서치 %d" % (_rx.get("asof", "?"), len(_rx["st"])))
+    except Exception as _e:
+        print("리서처 성과 스냅샷 건너뜀:", type(_e).__name__, _e)
     D["slm"] = load_sealed("slackm") or []      # 채널 멤버 메일(비공개 채널 링크는 멤버에게만, Marc 10-29)
 
     # ── 7.3 PEL 협업 에픽 (Biz-E Product Engineering Lab) — 디자인 관련만 (Marc 10-29) ──

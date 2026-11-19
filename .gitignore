@@ -23,3 +23,6 @@ thumbs.json
 # 업무 현황 전용 팀 명단(평문 → seal.py 로 xteam.enc) · 빌드 중간 결과(build.py 가 읽고 지움)
 xteam.json
 xt.json
+
+# 리서처 성과 스냅샷(평문 → seal.py 로 uxr.enc)
+uxr.json
