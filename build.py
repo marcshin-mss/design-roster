@@ -2433,7 +2433,7 @@ def main():
         def _kst2(ms):   # 한국 날짜 + 구간(0: 00~10시 · 1: 10~15시 · 2: 15~24시) — D.imp 와 같음
             _d = datetime.datetime.utcfromtimestamp(ms / 1000 + 9 * 3600)
             return _d.strftime("%Y-%m-%d") + "#%d" % (0 if _d.hour < 10 else 1 if _d.hour < 15 else 2)
-        if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE") and all(len(r) > 11 for r in (_wprev.get("rows") or [])):
+        if _wprev and _kst2(int(_wprev.get("at") or 0)) == _kst2(_now2) and not os.environ.get("IMP_FORCE") and all(len(r) > 11 for r in (_wprev.get("rows") or [])) and isinstance(_wprev.get("dt"), dict):
             D["wko"] = _wprev
             print("조직 전체 론치 성과: 지난 것 유지 (%d행)" % len(_wprev.get("rows") or []))
         elif EMAIL and TOKEN:
@@ -2482,7 +2482,31 @@ def main():
                 print("론치 에픽 담당 건너뜀:", type(_e).__name__)
                 for r in _wr:
                     if len(r) < 12: r.append("")
-            D["wko"] = {"at": _now2, "from": _from, "rows": _wr}
+            # dt = 론치한 이니셔티브의 디자인 티켓(PD 에픽 + 그 아래 작업) — 페이지가 「디자이너 역할」(무엇을 설계했는지)을 론치마다 보여 준다
+            #   (Marc 11-19 「이런건 왜 디자이너성과가 없지?」 — 성과 자료에 없는 론치도 디자인 티켓으로 역할이 나오게)
+            #   {이니셔티브 키: [[티켓 키, 제목, 담당, "E"(에픽)|"T"(작업), 상태]]} · 이니셔티브당 40건까지. 실패하면 지난 값 유지.
+            _dt = {}
+            try:
+                _ks = [r[0] for r in _wr if r[0]]
+                _ep = {}
+                for _i in range(0, len(_ks), 80):
+                    for y in jql("project = PD AND parent in (%s)" % ",".join(_ks[_i:_i + 80]), ["summary", "assignee", "parent", "status", "issuetype"], cap=6000):
+                        _pk = F(y, "parent", "key"); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        if not _pk: continue
+                        _ep[y.get("key")] = _pk
+                        _dt.setdefault(_pk, []).append([y.get("key"), str(F(y, "summary") or "")[:90], _nm, "E" if F(y, "issuetype", "name") == "Epic" else "T", F(y, "status", "name") or ""])
+                _eks = sorted(_ep)
+                for _i in range(0, len(_eks), 80):
+                    for y in jql("project = PD AND parent in (%s)" % ",".join(_eks[_i:_i + 80]), ["summary", "assignee", "parent", "status"], cap=12000):
+                        _pk = _ep.get(F(y, "parent", "key") or ""); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        if not _pk: continue
+                        _dt.setdefault(_pk, []).append([y.get("key"), str(F(y, "summary") or "")[:90], _nm, "T", F(y, "status", "name") or ""])
+                _dt = {k: v[:40] for k, v in _dt.items()}
+                print("론치 디자인 티켓: 이니셔티브 %d건 · 티켓 %d건" % (len(_dt), sum(len(v) for v in _dt.values())))
+            except Exception as _e:
+                print("론치 디자인 티켓 건너뜀:", type(_e).__name__)
+                _dt = (_wprev or {}).get("dt") if isinstance((_wprev or {}).get("dt"), dict) else {}
+            D["wko"] = {"at": _now2, "from": _from, "rows": _wr, "dt": _dt}
             print("조직 전체 론치 성과: 새로 받음 (%s 이후 %d행 · QBR %d · Weekly %d)" % (_from, len(_wr), sum(1 for r in _wr if r[5]), sum(1 for r in _wr if r[6])))
         elif _wprev:
             D["wko"] = _wprev
