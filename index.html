@@ -713,6 +713,13 @@ footer{padding:22px 20px 0;max-width:76ch}
 #gate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
   background:var(--plane);padding:24px}
 #gate.off{display:none}
+/* 불러오는 중 — 저장된 로그인으로 여는 동안과 앱이 첫 화면을 그리는 동안 (Marc 11-20 「새로고침하면 이 화면이 잠깐 보이는데 … 안보이게 해주던가 로딩을 만들어」) */
+#gld{display:none}
+#gate.ld .gbx{background:transparent;border-color:transparent;box-shadow:none}
+#gate.ld .gbx>h1,#gate.ld .gbx>p,#gate.ld #gbtn,#gate.ld #gmsg{display:none!important}
+#gate.ld #gld{display:flex;flex-direction:column;align-items:center;gap:12px;font-size:12px;line-height:18px;color:var(--ink-3)}
+#gld i{display:block;width:22px;height:22px;box-sizing:border-box;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--ink);animation:gldr .8s linear infinite}
+@keyframes gldr{to{transform:rotate(360deg)}}
 .gbx{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--rule);
   border-radius:12px;padding:26px 24px 22px;box-shadow:0 16px 40px rgba(0,0,0,.10)}
 .gbx h1{margin:0 0 8px;font-size:15px;letter-spacing:-.02em}
@@ -732,6 +739,7 @@ footer{padding:22px 20px 0;max-width:76ch}
     <p>디자인실 워크로드 대시보드입니다. 회사 계정으로 로그인하세요.</p>
     <div id="gbtn" style="display:flex;justify-content:center;margin:14px 0 2px"></div>
     <span class="gmsg" id="gmsg"></span>
+    <div id="gld" role="status" aria-live="polite"><i aria-hidden="true"></i><span>불러오는 중…</span></div>
   </div>
 </div>
 <div id="shell"></div>
@@ -742,8 +750,10 @@ footer{padding:22px 20px 0;max-width:76ch}
    data.json(암호화 가능) 과 basis.json 을 받아 앱을 띄운다. */
 const $=id=>document.getElementById(id);
 const gate=$("gate"), gmsg=$("gmsg");
+/* 저장된 로그인이 있으면 로그인 안내 대신 「불러오는 중」을 먼저 보여 준다 (Marc 11-20) */
+try{ const k=JSON.parse(localStorage.getItem("pxd-keep")||"null"); if(sessionStorage.getItem("pxd-key")||(k&&k.key&&k.exp>Date.now())) gate.classList.add("ld"); }catch(e){}
 const GCID="830037153887-18a8gh7nbeukd1rrsrb6vkt5l6uguf5i.apps.googleusercontent.com";
-function say(t,ok){ gmsg.textContent=t; gmsg.className="gmsg"+(ok?" ok":""); }
+function say(t,ok){ gate.classList.remove("ld"); gmsg.textContent=t; gmsg.className="gmsg"+(ok?" ok":""); }
 const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 
 async function decrypt(box,pw){
@@ -790,7 +800,13 @@ function boot(dataText,basis){
     B.SIZE[k]=[v.size,v.hours]; if(v.provisional)B.GUESS.push(k);});
   window.__B=B;
   document.getElementById("shell").outerHTML=APP.html;
-  gate.classList.add("off"); $("app").classList.remove("off");
+  $("app").classList.remove("off");
+  /* 앱이 첫 화면을 다 그릴 때(스킨이 입혀질 때)까지 「불러오는 중」으로 덮어 둔다 — 그 전의 옛 화면 틀이 몇 초 보이던 것을 가림 (Marc 11-20) */
+  gate.classList.remove("off"); gate.classList.add("ld");
+  const shown=()=>{ gate.classList.add("off"); gate.classList.remove("ld"); }, ready=()=>document.body.classList.contains("fga");
+  const mo=new MutationObserver(()=>{ if(ready()){ mo.disconnect(); shown(); } }); mo.observe(document.body,{attributes:true,attributeFilter:["class"]});
+  const tm=setTimeout(()=>{ mo.disconnect(); shown(); },15000);
+  window.addEventListener("error",()=>{ if(!ready()){ clearTimeout(tm); mo.disconnect(); shown(); } },{once:true});
   const sc=document.createElement("script");
   sc.textContent=APP.src;
   document.body.appendChild(sc);
@@ -825,6 +841,7 @@ function boot(dataText,basis){
     const m=savedMe||{}; window.__ME_EMAIL=m.email; window.__KPI_OK=!!m.kpi; window.__ADMIN=!!m.admin;
     if(await tryPw(savedKey)){ try{ sessionStorage.setItem("pxd-key",savedKey); sessionStorage.setItem("pxd-me",JSON.stringify(m)); }catch(e){} return; }
     try{ localStorage.removeItem("pxd-keep"); sessionStorage.removeItem("pxd-key"); }catch(e){}   /* 키가 바뀐 경우 → 아래 자동 재확인 */
+    gate.classList.remove("ld");
   }
   // 회사 계정 구글 로그인
   const AUTH=()=>(window.__SYNC&&window.__SYNC.url?window.__SYNC.url:"")+"/auth";
