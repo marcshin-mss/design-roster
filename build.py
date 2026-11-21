@@ -2608,6 +2608,75 @@ def main():
     except Exception as _e:
         print("시안 썸네일 건너뜀:", type(_e).__name__, _e)
 
+    # ── 시안 원본 자체 보관 (Marc 11-21 「왜 자꾸 지라 로그인하라는거야」 「아직도 이미지가 작게나왔다가 커져」)
+    #   크게 보기의 원본을 지라에서 바로 불러오면 그 브라우저가 지라에 로그인돼 있고 외부 쿠키를 허용해야만 보인다(썸네일과 같은 문제) →
+    #   TL 첨부 이미지(티켓마다 4장까지)를 지라 API 로 받아 긴 쪽 2000px 이하 WebP 로 줄이고, 임의 키로 AES-GCM 암호화해 rnf/<첨부 id>.bin 에 둔다(공개 리포 — 평문은 두지 않는다).
+    #   키와 크기표는 rnf.enc(GATE_PASS 봉인)에 두고 D["rnf"] = {"k": 키, "f": {첨부 id: [가로, 세로, JPEG 이면 1]}} 로 싣는다 — 페이지는 크기를 미리 알아 처음부터 제 크기로 띄운다.
+    #   이미 받은 것은 다시 받지 않는다. 한 번 빌드에 새로 받는 수는 80장까지(나머지는 다음 빌드).
+    try:
+        if EMAIL and TOKEN and GATE and D.get("rnx"):
+            import io
+            from PIL import Image
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            _rdir = os.path.join(HERE, "rnf")
+            os.makedirs(_rdir, exist_ok=True)
+            _st = load_sealed("rnf") or {}
+            _k64 = _st.get("k") or base64.b64encode(os.urandom(32)).decode()
+            _key = base64.b64decode(_k64)
+            _of = _st.get("f") or {}
+            _want = []
+            for _v in (D["rnx"].get("tl") or {}).values():
+                for _a in (_v.get("im") or [])[:4]:
+                    if str(_a[0]) not in _want: _want.append(str(_a[0]))
+            _nf, _new, _fail, _left = {}, 0, 0, 0
+            _auth = "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode()
+            for _id in _want:
+                _p = os.path.join(_rdir, _id + ".bin")
+                if _id in _of and os.path.exists(_p):
+                    _nf[_id] = _of[_id]; continue
+                if _new >= 80:
+                    _left += 1; continue
+                try:
+                    _rq = urllib.request.Request(BASE + "/rest/api/3/attachment/content/" + _id + "?redirect=false", headers={"Authorization": _auth, "Accept": "application/json, image/*, */*"})
+                    with urllib.request.urlopen(_rq, timeout=60) as _r:
+                        _ct = _r.headers.get("Content-Type", ""); _raw = _r.read()
+                    if "json" in _ct:   # 미디어 서버 주소를 돌려줌 → 그 주소로 받음
+                        _u = json.loads(_raw.decode()).get("url") or ""
+                        with urllib.request.urlopen(urllib.request.Request(_u), timeout=60) as _r2:
+                            _raw = _r2.read()
+                    _im = Image.open(io.BytesIO(_raw))
+                    try: _im.seek(0)   # 움직이는 그림은 첫 장만
+                    except Exception: pass
+                    _im = _im.convert("RGBA" if (_im.mode in ("RGBA", "LA", "PA") or "transparency" in _im.info) else "RGB")
+                    _im.thumbnail((2000, 2000))
+                    _b = io.BytesIO(); _jp = 0
+                    try:
+                        _im.save(_b, "WEBP", quality=82, method=4)
+                    except Exception:
+                        _b = io.BytesIO(); _jp = 1
+                        _bg = Image.new("RGB", _im.size, (255, 255, 255))
+                        _bg.paste(_im, mask=_im.split()[-1] if _im.mode == "RGBA" else None)
+                        _bg.save(_b, "JPEG", quality=84, optimize=True)
+                    _iv = os.urandom(12)
+                    with open(_p, "wb") as _fh:
+                        _fh.write(_iv + AESGCM(_key).encrypt(_iv, _b.getvalue(), None))
+                    _nf[_id] = [_im.size[0], _im.size[1], _jp]; _new += 1
+                except Exception as _e3:
+                    _fail += 1
+                    if _fail <= 3: print("  시안 원본 받기 실패:", _id, type(_e3).__name__, _e3)
+            save_sealed("rnf", {"k": _k64, "f": _nf})
+            D["rnf"] = {"k": _k64, "f": _nf}
+            print("시안 원본: %d장 (새로 받음 %d · 실패 %d · 다음 빌드로 넘김 %d)" % (len(_nf), _new, _fail, _left))
+    except Exception as _e:
+        print("시안 원본 건너뜀:", type(_e).__name__, _e)
+    if "rnf" not in D:   # 이번에 못 만들었으면 지난 표를 그대로 싣는다(파일이 있는 것만)
+        try:
+            _st = load_sealed("rnf") if GATE else None
+            if _st and _st.get("k"):
+                D["rnf"] = {"k": _st["k"], "f": {i: v for i, v in (_st.get("f") or {}).items() if os.path.exists(os.path.join(HERE, "rnf", i + ".bin"))}}
+        except Exception as _e:
+            print("시안 원본 표 건너뜀:", type(_e).__name__, _e)
+
     # ── 지라 이력 스냅샷 (Marc 11-07 「AI 생산성은 왜 아무것도 안나와?」)
     #   Worker 의 지라 계정이 PD · M29CMPROD · PEL · TL · FT 를 못 보게 되어 /dlt · /pel · /launch · /ft-lt 가 0건 →
     #   같은 계산(worker.js 함수 그대로, jira-snap.mjs)을 이 갱신 작업의 지라 계정으로 돌려 D["wj"] 에 넣는다.
