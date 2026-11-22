@@ -957,6 +957,73 @@ export default {
       return J({ error: "method" }, 405, cors);
     }
 
+    /* ── 디자인 측정 「지금 분석하기」 (Marc 11-22 「급하게 필요할 때 눌러볼 것 같아」 · 11-22 클라우드 작업으로 연결)
+       · POST /an-req  x-gate  {key, by, ctx} — 한 번 쓰는 작업 번호(job)를 만들어 KV 에 과제 측정 내용(ctx)과 함께 1시간 보관하고,
+         클라우드 예약 작업 「디자인 측정 지금 분석」의 API 트리거를 깨움(본문 {"job","key"}) · 같은 과제 10분에 한 번
+       · GET  /an-job?n=JOB         — 깨어난 작업이 측정 내용을 가져감(작업 번호가 곧 열쇠 · 1시간 뒤 사라짐)
+       · POST /an-put?n=JOB {rec}   — 작업이 분석 한 건을 올림 → an:rec:KEY 에 쌓음(최근 20건) · 작업 번호는 한 번 쓰면 지워짐
+       · GET  /an?k=KEY  x-gate     — 화면이 분석 기록을 읽음
+       · 토큰은 Worker 시크릿 AN_FIRE_TOKEN, 주소는 AN_FIRE_URL(둘 다 Marc 이 직접 넣음) — 없으면 404 no-token ── */
+    if (path === "/an-req" || path === "/an-job" || path === "/an-put" || path === "/an") {
+      const u = new URL(req.url), KEYRE = /^[A-Z][A-Z0-9]+-[0-9]+$/, JOBRE = /^[0-9a-f-]{36}$/;
+      const clip = (v, n) => String(v == null ? "" : v).slice(0, n);
+      if (req.method === "POST" && path === "/an-req") {
+        if (!gateOK()) return J({ error: "gate" }, 403, cors);
+        if (!env.AN_FIRE_TOKEN || !env.AN_FIRE_URL) return J({ error: "no-token" }, 404, cors);
+        let b; try { b = await req.json(); } catch (e) { return J({ error: "json" }, 400, cors); }
+        const key = String((b && b.key) || "");
+        if (!KEYRE.test(key)) return J({ error: "bad-key" }, 400, cors);
+        const by = String((b && b.by) || "").replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 20);
+        let ctx = (b && b.ctx && typeof b.ctx === "object") ? b.ctx : {};
+        if (JSON.stringify(ctx).length > 30000) ctx = { note: "too-big" };
+        const lk = "an:req:" + key, last = +((await env.ROSTER.get(lk)) || 0);
+        if (Date.now() - last < 10 * 60 * 1000) return J({ ok: false, error: "busy" }, 429, cors);
+        const job = crypto.randomUUID();
+        await env.ROSTER.put(lk, String(Date.now()), { expirationTtl: 3600 });
+        await env.ROSTER.put("an:job:" + job, JSON.stringify({ key, by, ctx, at: Date.now() }), { expirationTtl: 3600 });
+        const r = await fetch(String(env.AN_FIRE_URL).trim(), { method: "POST", headers: { "Authorization": "Bearer " + String(env.AN_FIRE_TOKEN).trim(), "anthropic-beta": "experimental-cc-routine-2026-04-01", "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ text: JSON.stringify({ job, key }) }) });
+        if (r.ok) return J({ ok: true, at: Date.now() }, 200, cors);
+        await env.ROSTER.delete(lk); await env.ROSTER.delete("an:job:" + job);
+        return J({ ok: false, error: "fire", status: r.status }, 502, cors);
+      }
+      if (req.method === "GET" && path === "/an-job") {
+        const n = String(u.searchParams.get("n") || "");
+        if (!JOBRE.test(n)) return J({ error: "bad-job" }, 400, cors);
+        const v = await env.ROSTER.get("an:job:" + n);
+        if (!v) return J({ error: "no-job" }, 404, cors);
+        return new Response(v, { status: 200, headers: { ...cors, "content-type": "application/json" } });
+      }
+      if (req.method === "POST" && path === "/an-put") {
+        const n = String(u.searchParams.get("n") || "");
+        if (!JOBRE.test(n)) return J({ error: "bad-job" }, 400, cors);
+        const jv = await env.ROSTER.get("an:job:" + n);
+        if (!jv) return J({ error: "no-job" }, 404, cors);
+        const job = JSON.parse(jv);
+        const txt = await req.text();
+        if (txt.length > 40000) return J({ error: "too-big" }, 413, cors);
+        let b; try { b = JSON.parse(txt); } catch (e) { return J({ error: "json" }, 400, cors); }
+        const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().replace("T", " ").slice(0, 16);
+        const rec = { at: kst, by: job.by || "", h: clip(b && b.h, 1500) };
+        if (b && b.tb && Array.isArray(b.tb.r)) rec.tb = { t: clip(b.tb.t, 80), c: (b.tb.c || []).slice(0, 8).map(x => clip(x, 40)), r: b.tb.r.slice(0, 40).map(row => (Array.isArray(row) ? row : []).slice(0, 8).map(x => clip(x, 60))), n: (b.tb.n || []).slice(0, 6).map(x => clip(x, 400)) };
+        if (b && Array.isArray(b.s)) rec.s = b.s.slice(0, 8).map(x => [clip(x && x[0], 60), ((x && x[1]) || []).slice(0, 10).map(l => clip(l, 500)), x && x[2] ? 1 : 0]);
+        if (!rec.h && !rec.tb && !rec.s) return J({ error: "empty" }, 400, cors);
+        const rk = "an:rec:" + job.key;
+        let A = []; try { A = JSON.parse((await env.ROSTER.get(rk)) || "[]") || []; } catch (e) { A = []; }
+        A.unshift(rec); A = A.slice(0, 20);
+        await env.ROSTER.put(rk, JSON.stringify(A));
+        await env.ROSTER.delete("an:job:" + n);
+        return J({ ok: true, at: kst }, 200, cors);
+      }
+      if (req.method === "GET" && path === "/an") {
+        if (!gateOK()) return J({ error: "gate" }, 403, cors);
+        const k = String(u.searchParams.get("k") || "");
+        if (!KEYRE.test(k)) return J({ error: "bad-key" }, 400, cors);
+        const v = await env.ROSTER.get("an:rec:" + k);
+        return new Response(v || "[]", { status: 200, headers: { ...cors, "content-type": "application/json", "cache-control": "no-store" } });
+      }
+      return J({ error: "method" }, 405, cors);
+    }
+
     /* ── 지금 다시 읽기 : 지라 재조회 워크플로를 깨운다 ── */
     if (req.method === "POST" && path === "/refresh") {
       if (!gateOK()) return J({ error: "gate" }, 403, cors);
