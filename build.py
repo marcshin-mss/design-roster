@@ -2462,7 +2462,14 @@ def main():
                 return c
             _mv = lambda v: ", ".join(str((x or {}).get("value") or "") for x in (v or []) if isinstance(x, dict))
             _fl = ["summary", "status", "resolutiondate", "customfield_10710", "customfield_19702", "customfield_10625",
-                   "customfield_10627", "customfield_10620", "assignee", "labels"]
+                   "customfield_10627", "customfield_10620", "assignee", "labels", "duedate", "statuscategorychangedate"]
+            # 론치일 — 해결일이 비어 있으면 마감일(상태가 바뀐 날보다 늦지 않을 때) → 상태가 론치완료로 바뀐 날.
+            #   Impact Sharing Date(결과 공유 예정일)를 론치일로 쓰지 않게 (Marc 11-22 AP-94 「임팩트 셰어링과 론치일은 다르잖아」)
+            def _ld(f):
+                rd = str(f.get("resolutiondate") or "")[:10]
+                if rd: return rd
+                dd = str(f.get("duedate") or "")[:10]; sc = str(f.get("statuscategorychangedate") or "")[:10]
+                return dd if dd and (not sc or dd <= sc) else sc
             _q = ('issuetype = Initiative AND status in (론치완료, 배포완료) AND (resolved >= "%s" OR "Impact Sharing Date[Date]" >= "%s") '
                   'ORDER BY resolved DESC' % (_from, _from))
             _wr = []
@@ -2472,7 +2479,7 @@ def main():
                 qb = "" if qb is None else (qb if isinstance(qb, str) else _adf2(qb))
                 wk = "" if wk is None else (wk if isinstance(wk, str) else _adf2(wk))
                 _wr.append([x.get("key"), f.get("summary") or "", (f.get("status") or {}).get("name") or "",
-                            str(f.get("resolutiondate") or "")[:10], str(f.get("customfield_19702") or "")[:10],
+                            _ld(f), str(f.get("customfield_19702") or "")[:10],
                             qb.strip()[:2500], wk.strip()[:1500], _mv(f.get("customfield_10627")), _mv(f.get("customfield_10620")),
                             (f.get("assignee") or {}).get("displayName") or "", ",".join(f.get("labels") or [])[:300]])
             # r[11] = 이니셔티브 바로 아래 에픽 담당(디자인 에픽 포함) — 지난 분기 론치처럼 디자인 티켓이 분기 데이터에 없을 때
