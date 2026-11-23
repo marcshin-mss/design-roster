@@ -116,7 +116,7 @@ async function allowList(env) {
 
 /* ── Design Driven 편집 ─────────────────────────────────────── */
 const JIRA_BASE = "https://musinsa-oneteam.atlassian.net";
-const EDIT_TTL = 12 * 3600;
+const EDIT_TTL = 30 * 86400;   /* 편집 로그인 30일 · 쓰는 동안 /et-renew 로 연장 (Marc 11-23 「다시 로그인 자꾸 안뜨게」) */
 const DD_PROJECT = "FT";
 const JV_PROJECTS = ["FT", "TM", "PD", "M29CMPROD", "PEL"];   /* 시트에서 지라 내용을 다시 읽을 수 있는 프로젝트 — 읽기만. 수정(/jira-edit)은 FT 만 (Marc 11-14 「전체 메뉴에 사이드 시트에서 상위 지라를 보는 방식 … 맞췄어?」) */
 const DD_PRI = ["Highest", "High", "Medium", "Low", "Lowest"];
@@ -610,6 +610,14 @@ export default {
                  kpi: allow.includes(email), admin: email === OWNER,
                  deploy: email === OWNER && env.DEPLOY_HASH ? await deployToken(env, email) : undefined,
                  edit: env.GATE_HASH ? await editToken(env, email) : undefined }, 200, cors);
+    }
+
+    /* ── 편집 로그인 연장 : 아직 유효한 편집 토큰 → 같은 사람의 새 토큰(30일) ── */
+    if (req.method === "POST" && path === "/et-renew") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      const email = await editTokenEmail(env, b && b.token);
+      if (!email) return J({ ok: false, error: "auth" }, 403, cors);
+      return J({ ok: true, edit: await editToken(env, email) }, 200, cors);
     }
 
     /* ── 지표 허용목록 읽기/저장 (소유자 전용) ── */
