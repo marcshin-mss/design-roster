@@ -1723,6 +1723,40 @@ def main():
             D["pj"] = D["pjq"][_qlab(_cq)]
     except Exception as _e:
         print("분기 프로젝트 건너뜀:", type(_e).__name__)
+    # 분기 화면 보관 (Marc 2026-11-23 「한 분기가 지나면 어딘가에 현재 분기가 그대로 남고 다음분기를 탭으로」 → 「같은방식으로 남겨줘」)
+    #   pjq 로 그리지 않는 메뉴(ONE sync · FT 과제 관리 · 디자인 QA 현황 · 디자인 성과)는 지난 분기 탭에서 그 분기 마지막 커밋의 대시보드(앱 + 자료)를 그대로 띄운다.
+    #   D["qarc"] = {"26 4Q": {"sha": 커밋, "at": "YYYY-MM-DD HH:MM"(KST)}} — 분기가 끝난 뒤 첫 빌드에서 한 번 찾고, 그 뒤로는 지난 data.json 에서 이어 싣는다.
+    try:
+        _qa = {k: v for k, v in (((_old_data() or {}).get("qarc")) or {}).items() if isinstance(v, dict) and v.get("sha")}
+        _kn = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).date()
+        _y, _n = 2000 + int(ARCH_FROM[:2]), int(ARCH_FROM[3])
+        while True:
+            _ny, _nn = (_y + 1, 1) if _n == 4 else (_y, _n + 1)
+            _qe = datetime.date(_ny, 3 * _nn - 2, 1)          # 다음 분기 첫날(한국 시간)
+            if _qe > _kn:
+                break                                       # 아직 안 끝난 분기
+            _lab = "%02d %dQ" % (_y % 100, _n)
+            if _lab not in _qa:
+                _until = (datetime.datetime(_qe.year, _qe.month, 1) - datetime.timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _hd = {"User-Agent": "design-roster-build", "Accept": "application/vnd.github+json"}
+                if os.environ.get("GITHUB_TOKEN"):
+                    _hd["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
+                _repo = os.environ.get("GITHUB_REPOSITORY") or "marcshin-mss/design-roster"
+                try:
+                    _rq = urllib.request.Request("https://api.github.com/repos/%s/commits?until=%s&per_page=1" % (_repo, _until), headers=_hd)
+                    _c = json.loads(urllib.request.urlopen(_rq, timeout=20).read().decode())
+                    if _c and _c[0].get("sha"):
+                        _dt = (((_c[0].get("commit") or {}).get("committer")) or {}).get("date") or ""
+                        _at = (datetime.datetime.strptime(_dt[:19], "%Y-%m-%dT%H:%M:%S") + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M") if _dt else ""
+                        _qa[_lab] = {"sha": _c[0]["sha"], "at": _at}
+                        print("분기 화면 보관:", _lab, _c[0]["sha"][:7], _at)
+                except Exception as _e:
+                    print("분기 화면 보관 %s 커밋 찾기 실패(다음 빌드에서 다시):" % _lab, type(_e).__name__)
+            _y, _n = _ny, _nn
+        if _qa:
+            D["qarc"] = _qa
+    except Exception as _e:
+        print("분기 화면 보관 건너뜀:", type(_e).__name__)
     try:
         apply_assignments({m["name"]: m["account"] for t in teams for m in t["members"] if m.get("account")})
     except Exception as _e:

@@ -964,7 +964,7 @@ export default {
        · POST /an-put?n=JOB {rec}   — 작업이 분석 한 건을 올림 → an:rec:KEY 에 쌓음(최근 20건) · 작업 번호는 한 번 쓰면 지워짐
        · GET  /an?k=KEY  x-gate     — 화면이 분석 기록을 읽음
        · 토큰은 Worker 시크릿 AN_FIRE_TOKEN, 주소는 AN_FIRE_URL(둘 다 Marc 이 직접 넣음) — 없으면 404 no-token ── */
-    if (path === "/an-req" || path === "/an-job" || path === "/an-put" || path === "/an") {
+    if (path === "/an-req" || path === "/an-job" || path === "/an-put" || path === "/an" || path === "/an-sum") {
       const u = new URL(req.url), KEYRE = /^[A-Z][A-Z0-9]+-[0-9]+$/, JOBRE = /^[0-9a-f-]{36}$/;
       const clip = (v, n) => String(v == null ? "" : v).slice(0, n);
       if (req.method === "POST" && path === "/an-req") {
@@ -978,6 +978,9 @@ export default {
         if (JSON.stringify(ctx).length > 30000) ctx = { note: "too-big" };
         const lk = "an:req:" + key, last = +((await env.ROSTER.get(lk)) || 0);
         if (Date.now() - last < 10 * 60 * 1000) return J({ ok: false, error: "busy" }, 429, cors);
+        /* 과제당 하루 한 번 (Marc 11-23 「하루 전체 상한은 과제당 하루 한번으로 해」) — 그날(한국 시간) 분석이 이미 올라왔으면 받지 않음 · 실패(#FAIL#)는 세지 않음 */
+        const kd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        if ((await env.ROSTER.get("an:day:" + key)) === kd) return J({ ok: false, error: "today" }, 429, cors);
         const job = crypto.randomUUID();
         await env.ROSTER.put(lk, String(Date.now()), { expirationTtl: 3600 });
         await env.ROSTER.put("an:job:" + job, JSON.stringify({ key, by, ctx, at: Date.now() }), { expirationTtl: 3600 });
@@ -1006,13 +1009,25 @@ export default {
         const rec = { at: kst, by: job.by || "", h: clip(b && b.h, 1500) };
         if (b && b.tb && Array.isArray(b.tb.r)) rec.tb = { t: clip(b.tb.t, 80), c: (b.tb.c || []).slice(0, 8).map(x => clip(x, 40)), r: b.tb.r.slice(0, 40).map(row => (Array.isArray(row) ? row : []).slice(0, 8).map(x => clip(x, 60))), n: (b.tb.n || []).slice(0, 6).map(x => clip(x, 400)) };
         if (b && Array.isArray(b.s)) rec.s = b.s.slice(0, 8).map(x => [clip(x && x[0], 60), ((x && x[1]) || []).slice(0, 10).map(l => clip(l, 500)), x && x[2] ? 1 : 0]);
+        /* 판정 · 다음 측정일 (Marc 11-23 「이대로 진행해」 — 분석을 판정 · 근거 수치 · 왜 · 다음에 할 것 4칸으로) */
+        if (b && /^(up|none|down|wait)$/.test(String(b.j || ""))) rec.j = String(b.j);
+        if (b && b.nd) rec.nd = clip(b.nd, 20);
         if (!rec.h && !rec.tb && !rec.s) return J({ error: "empty" }, 400, cors);
         const rk = "an:rec:" + job.key;
         let A = []; try { A = JSON.parse((await env.ROSTER.get(rk)) || "[]") || []; } catch (e) { A = []; }
         A.unshift(rec); A = A.slice(0, 20);
         await env.ROSTER.put(rk, JSON.stringify(A));
+        if (String(rec.h || "").indexOf("#FAIL#") !== 0) await env.ROSTER.put("an:day:" + job.key, kst.slice(0, 10), { expirationTtl: 2 * 86400 });
+        /* 과제별 마지막 판정 한 줄 모음 — 목록 카드의 「AI 요약」이 아침 측정 요약보다 새 분석이 있으면 이것을 씀 */
+        if (String(rec.h || "").indexOf("#FAIL#") !== 0) { let S = {}; try { S = JSON.parse((await env.ROSTER.get("an:sum")) || "{}") || {}; } catch (e) { S = {}; }
+          S[job.key] = { t: clip(rec.h, 400), j: rec.j || "", at: kst }; await env.ROSTER.put("an:sum", JSON.stringify(S)); }
         await env.ROSTER.delete("an:job:" + n);
         return J({ ok: true, at: kst }, 200, cors);
+      }
+      if (req.method === "GET" && path === "/an-sum") {
+        if (!gateOK()) return J({ error: "gate" }, 403, cors);
+        const v = await env.ROSTER.get("an:sum");
+        return new Response(v || "{}", { status: 200, headers: { ...cors, "content-type": "application/json", "cache-control": "no-store" } });
       }
       if (req.method === "GET" && path === "/an") {
         if (!gateOK()) return J({ error: "gate" }, 403, cors);
