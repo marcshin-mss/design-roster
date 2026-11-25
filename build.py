@@ -25,6 +25,19 @@ DROP_ST = {"Dropped", "철회/반려/취소"}
 TODO_ST = {"Backlog", "SUGGESTED", "할일"}
 
 
+SKIP_KEYS = {"M29CMPROD-1905"}   # 로스터에서 뺄 티켓 (Marc 11-25 「M29CMPROD-1905 제거해」 — 하치 시험 티켓)
+_SKIP_T = re.compile(r"^\s*\[(테스트|TEST|Test|test)\]")
+
+
+def _skip_issue(n):
+    try:
+        if n.get("key") in SKIP_KEYS:
+            return True
+        return bool(_SKIP_T.match(str((n.get("fields") or {}).get("summary") or "")))
+    except Exception:
+        return False
+
+
 def jql(q, fields, cap=2000):
     """JQL 한 번. nextPageToken 으로 끝까지 넘긴다."""
     out, token = [], None
@@ -51,7 +64,7 @@ def jql(q, fields, cap=2000):
                 import time as _t
                 print(f"  지라 연결 실패({e}), {2**attempt}초 후 재시도")
                 _t.sleep(2 ** attempt)
-        out += d.get("issues", [])
+        out += [n for n in d.get("issues", []) if not _skip_issue(n)]   # 테스트 · 지울 티켓은 로스터에서 뺌 (Marc 11-25)
         token = d.get("nextPageToken")
         if not token or d.get("isLast") or len(out) >= cap:
             return out
@@ -2516,6 +2529,18 @@ def main():
                             _ld(f), str(f.get("customfield_19702") or "")[:10],
                             qb.strip()[:2500], wk.strip()[:1500], _mv(f.get("customfield_10627")), _mv(f.get("customfield_10620")),
                             (f.get("assignee") or {}).get("displayName") or "", ",".join(f.get("labels") or [])[:300]])
+            # 동명이인 — 디자인 조직 명단과 이름만 같고 지라 계정(소속)이 다른 사람은 뺀다 (Marc 11-25 「이현규는 동명이인이야. 이럴땐 소속을 보고 판단해줘」
+            #   — 론치 에픽 담당의 이현규가 BiznE Commerce Client 프론트엔드였음). 명단 계정과 같으면 명단 이름으로, 계정을 모르면 이름 그대로.
+            _nm_acc = {m["name"]: m.get("account") for t in teams for m in t["members"]}
+            _acc_nm = {m["account"]: m["name"] for t in teams for m in t["members"] if m.get("account")}
+            def _same_nm(y):
+                _acc = F(y, "assignee", "accountId") or ""
+                _n = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                if _acc and _acc in _acc_nm:
+                    return _acc_nm[_acc]
+                if _n in _nm_acc and _nm_acc.get(_n) and _acc and _acc != _nm_acc[_n]:
+                    return ""
+                return _n
             # r[11] = 이니셔티브 바로 아래 에픽 담당(디자인 에픽 포함) — 지난 분기 론치처럼 디자인 티켓이 분기 데이터에 없을 때
             #   페이지가 디자인 조직 명단과 맞춰 디자인 담당으로 쓴다 (Marc 11-05 「부티크 전체 브랜드 별도 섹션 디자이너 미기록 → 이현규님」)
             try:
@@ -2523,7 +2548,7 @@ def main():
                 _ks = [r[0] for r in _wr if r[0]]
                 for _i in range(0, len(_ks), 80):
                     for y in jql("parent in (%s) AND issuetype = Epic" % ",".join(_ks[_i:_i + 80]), ["assignee", "parent"], cap=4000):
-                        _pk = F(y, "parent", "key"); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        _pk = F(y, "parent", "key"); _nm = _same_nm(y)
                         if _pk and _nm:
                             _L = _dm.setdefault(_pk, [])
                             if _nm not in _L: _L.append(_nm)
@@ -2542,14 +2567,14 @@ def main():
                 _ep = {}
                 for _i in range(0, len(_ks), 80):
                     for y in jql("project = PD AND parent in (%s)" % ",".join(_ks[_i:_i + 80]), ["summary", "assignee", "parent", "status", "issuetype"], cap=6000):
-                        _pk = F(y, "parent", "key"); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        _pk = F(y, "parent", "key"); _nm = _same_nm(y)
                         if not _pk: continue
                         _ep[y.get("key")] = _pk
                         _dt.setdefault(_pk, []).append([y.get("key"), str(F(y, "summary") or "")[:90], _nm, "E" if F(y, "issuetype", "name") == "Epic" else "T", F(y, "status", "name") or ""])
                 _eks = sorted(_ep)
                 for _i in range(0, len(_eks), 80):
                     for y in jql("project = PD AND parent in (%s)" % ",".join(_eks[_i:_i + 80]), ["summary", "assignee", "parent", "status"], cap=12000):
-                        _pk = _ep.get(F(y, "parent", "key") or ""); _nm = (F(y, "assignee", "displayName") or "").split("/")[0].strip()
+                        _pk = _ep.get(F(y, "parent", "key") or ""); _nm = _same_nm(y)
                         if not _pk: continue
                         _dt.setdefault(_pk, []).append([y.get("key"), str(F(y, "summary") or "")[:90], _nm, "T", F(y, "status", "name") or ""])
                 _dt = {k: v[:40] for k, v in _dt.items()}
