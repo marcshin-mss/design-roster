@@ -89,5 +89,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         if: steps.commit.outputs.skip != '1'
         with: { path: "." }
+    outputs:
+      skip: ${{ steps.commit.outputs.skip }}
+
+  # 배포는 따로 — 같은 작업에서 올린 직후 배포하면 「No artifacts named github-pages」로 가끔 실패해서 나눔 (2026-11-25)
+  deploy:
+    needs: build
+    if: needs.build.outputs.skip != '1'
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/deploy-pages@v4
-        if: steps.commit.outputs.skip != '1'
