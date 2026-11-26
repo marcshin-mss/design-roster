@@ -1905,7 +1905,8 @@ def main():
         print("리서처 성과 스냅샷 건너뜀:", type(_e).__name__, _e)
     # 디자인 측정 · 디자이너 성과 보강 스냅샷 — 예약 작업이 프로젝트 문서로 갱신하고 맥이 dm.enc · dq.enc 로 봉인 (Marc 11-19 「앞으로 성과를 이렇게 고도화 하면서 싱크되도록」)
     #   dm = {v, asof, m:{과제 키: 측정 줄}} → 페이지가 V2DM 위에 덮음 / dq = {v, asof, q:{과제 키: {t, i:[성과 항목], r?}}} → 페이지가 성과 자료에 합침. 없으면 건너뜀.
-    for _nm, _key, _fld in (("dm", "dmx", "m"), ("dq", "dqx", "q")):
+    #   tc = {v, asof, t:{과제 키: {ty, cr, rl, i, st, at}}, done} → 페이지 「과제 기여」(론치 외 · 론치 전 과제의 디자이너 기여, Marc 11-26)
+    for _nm, _key, _fld in (("dm", "dmx", "m"), ("dq", "dqx", "q"), ("tc", "tcx", "t")):
         try:
             _sx = load_sealed(_nm)
             if isinstance(_sx, dict) and isinstance(_sx.get(_fld), dict):

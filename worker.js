@@ -19,6 +19,7 @@
    · /dd-editors POST {token[,acc]} — 편집 허용 지라 계정 목록(KV dd:editors) 읽기/저장(소유자 전용, 대시보드가 로스터로 자동 동기화)
    · /ft-lt      POST {token[,fresh]} — FT 리드타임(경윤님 기준) 행 + 개발 진입 시각 dvs, KV ft:lt2 3시간 캐시
    · /impact     POST {token,keys[]} — 론치 후 결과(QBR 공유사항·Impact Sharing Date), 1시간 캐시
+   · /tc-crit    POST {token} 또는 x-gate — 과제 기여 평가 기준 한 줄(팀장이 고친 것) 읽기 · {token,set,key,text} 저장, KV tc:crit (11-26)
    · /pel        POST {token} 또는 x-gate — PEL 에픽(7/1 이후) 상태 · 부모 과제 · 담당 · 진행→완료 리드타임, KV pel:v1 3시간 캐시
    · /dlt        POST {token} 또는 x-gate — 디자인 과제(PD · M29CMPROD 에픽) 진행→완료 리드타임 · 주별 처리, KV dlt:v1 3시간 캐시
    · /launch     POST {token} 또는 x-gate — 론치 캘린더(지라 TL, 기한 7/1 이후): 론치 예정일 · 완료 · 연결 키 · 기대효과, KV tl:v1 1시간 캐시 (11-02)
@@ -711,6 +712,24 @@ export default {
     }
 
     /* ── Design Driven: 최근 변경 기록 ── */
+    /* ── 과제 기여: 과제마다 「무엇으로 평가하나」 한 줄 — 팀장이 고친 것 (Marc 11-26 「과제마다 어떤 기준으로 평가 할건지 기준을 세우고」 → Claude 제안 → 팀장 고침) ──
+       POST {token?} → {ok, m:{키:{t, by, at}}} (읽기: 편집 토큰 또는 팀 공용 게이트) · POST {token, set:1, key, text} → 저장(편집 토큰만, text 가 비면 지움) */
+    if (req.method === "POST" && path === "/tc-crit") {
+      let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
+      const email = await editTokenEmail(env, b && b.token);
+      if (!email && !gateOK()) return J({ ok: false, error: "auth" }, 403, cors);
+      let m = {}; try { m = JSON.parse((await env.ROSTER.get("tc:crit")) || "{}") || {}; } catch (e) { m = {}; }
+      if (b && b.set) {
+        if (!email) return J({ ok: false, error: "auth" }, 403, cors);
+        const key = String(b.key || "").toUpperCase();
+        if (!/^[A-Z][A-Z0-9]{1,15}-\d{1,7}$/.test(key)) return J({ ok: false, error: "key" }, 400, cors);
+        const t = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 200);
+        if (t) m[key] = { t, by: email.split("@")[0], at: Date.now() }; else delete m[key];
+        await env.ROSTER.put("tc:crit", JSON.stringify(m));
+      }
+      return J({ ok: true, m }, 200, cors);
+    }
+
     if (req.method === "POST" && path === "/dd-log") {
       let b; try { b = await req.json(); } catch (e) { return J({ ok: false, error: "json" }, 400, cors); }
       if (!(await editTokenEmail(env, b && b.token))) return J({ ok: false, error: "auth" }, 403, cors);
