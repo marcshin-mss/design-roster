@@ -985,7 +985,7 @@ export default {
     }
 
     /* ── 디자인 측정 「지금 분석하기」 (Marc 11-22 「급하게 필요할 때 눌러볼 것 같아」 · 11-22 클라우드 작업으로 연결)
-       · POST /an-req  x-gate  {key, by, ctx} — 한 번 쓰는 작업 번호(job)를 만들어 KV 에 과제 측정 내용(ctx)과 함께 1시간 보관하고,
+       · POST /an-req  x-gate  {key, by, em, t, ctx} — (em = 누른 사람 회사 메일 · 분석이 끝나면 클라우드 작업이 그 사람에게 슬랙 DM, 11-26) 한 번 쓰는 작업 번호(job)를 만들어 KV 에 과제 측정 내용(ctx)과 함께 1시간 보관하고,
          클라우드 예약 작업 「디자인 측정 지금 분석」의 API 트리거를 깨움(본문 {"job","key"}) · 같은 과제 10분에 한 번
        · GET  /an-job?n=JOB         — 깨어난 작업이 측정 내용을 가져감(작업 번호가 곧 열쇠 · 1시간 뒤 사라짐)
        · POST /an-put?n=JOB {rec}   — 작업이 분석 한 건을 올림 → an:rec:KEY 에 쌓음(최근 20건) · 작업 번호는 한 번 쓰면 지워짐
@@ -1001,6 +1001,9 @@ export default {
         const key = String((b && b.key) || "");
         if (!KEYRE.test(key)) return J({ error: "bad-key" }, 400, cors);
         const by = String((b && b.by) || "").replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 20);
+        /* 분석이 끝나면 누른 사람에게 슬랙 DM (Marc 11-26 「분석이 끝나면 버튼을 누른 사람의 슬랙 DM으로 보내줘」) — 회사 메일만 받아 작업에 붙여 둠(작업 번호가 열쇠 · 1시간 뒤 사라짐) */
+        const em0 = String((b && b.em) || "").toLowerCase().trim(), em = /^[a-z0-9._%+-]{1,64}@(musinsa\.com|29cm\.co\.kr)$/.test(em0) ? em0 : "";
+        const tt = String((b && b.t) || "").replace(/[\u0000-\u001f]/g, " ").slice(0, 120);
         let ctx = (b && b.ctx && typeof b.ctx === "object") ? b.ctx : {};
         if (JSON.stringify(ctx).length > 30000) ctx = { note: "too-big" };
         const lk = "an:req:" + key, last = +((await env.ROSTER.get(lk)) || 0);
@@ -1010,7 +1013,7 @@ export default {
         if ((await env.ROSTER.get("an:day:" + key)) === kd) return J({ ok: false, error: "today" }, 429, cors);
         const job = crypto.randomUUID();
         await env.ROSTER.put(lk, String(Date.now()), { expirationTtl: 3600 });
-        await env.ROSTER.put("an:job:" + job, JSON.stringify({ key, by, ctx, at: Date.now() }), { expirationTtl: 3600 });
+        await env.ROSTER.put("an:job:" + job, JSON.stringify({ key, by, em, t: tt, ctx, at: Date.now() }), { expirationTtl: 3600 });
         const r = await fetch(String(env.AN_FIRE_URL).trim(), { method: "POST", headers: { "Authorization": "Bearer " + String(env.AN_FIRE_TOKEN).trim(), "anthropic-beta": "experimental-cc-routine-2026-04-01", "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ text: JSON.stringify({ job, key }) }) });
         if (r.ok) return J({ ok: true, at: Date.now() }, 200, cors);
         await env.ROSTER.delete(lk); await env.ROSTER.delete("an:job:" + job);
